@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build artifacts
+.next/
+out/
+dist/
+build/
+
+# SQLite WAL and lock files
+Backend/data/*.db-shm
+Backend/data/*.db-wal
+*.db-shm
+*.db-wal
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
