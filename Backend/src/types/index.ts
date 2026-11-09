@@ -22,6 +22,68 @@ export interface UserPublicProfile {
   created_by: number | null;
   creator_name?: string;
   created_at: number;
+  last_login?: number | null;
+  keys_generated?: number;
+  active_keys?: number;
+  bound_keys?: number;
+  expired_keys?: number;
+  paused_keys?: number;
+  credits_spent?: number;
+  receipts_count?: number;
+}
+
+export interface PaymentReceiptRecord {
+  id: number;
+  receipt_no: string;
+  user_id: number | null;
+  username: string;
+  customer_name: string;
+  amount_paid: number;
+  currency: string;
+  credits_granted: number;
+  keys_summary: string;
+  payment_method: string;
+  transaction_ref: string;
+  proof_image?: string;
+  key_str?: string;
+  status: "paid" | "pending" | "refunded";
+  note: string;
+  issued_by_id: number | null;
+  issued_by_name: string;
+  created_at: number;
+}
+
+export interface KeyReceiptInput {
+  customerName?: string;
+  amountPaid?: number;
+  currency?: string;
+  paymentMethod?: string;
+  transactionRef?: string;
+  proofImage?: string;
+}
+
+export interface OwnerNotificationRecord {
+  id: number;
+  event_type: "key_created" | "batch_created";
+  creator_id: number | null;
+  creator_username: string;
+  creator_role: UserRole;
+  quantity: number;
+  duration_days: number;
+  credit_cost: number;
+  balance_after: number;
+  max_resets: number;
+  keys_list: string[];
+  note: string;
+  customer_name: string;
+  payment_amount: number;
+  payment_currency: string;
+  payment_method: string;
+  payment_ref: string;
+  proof_image: string;
+  receipt_no: string;
+  is_read: boolean;
+  created_at: number;
 }
 
 export interface KeyRecord {
@@ -39,6 +101,13 @@ export interface KeyRecord {
   reset_count: number;
   created_by_id: number | null;
   created_by_name: string;
+  customer_name?: string;
+  payment_amount?: number;
+  payment_currency?: string;
+  payment_method?: string;
+  payment_ref?: string;
+  proof_image?: string;
+  receipt_id?: number | null;
 }
 
 export interface CreditTransactionRecord {

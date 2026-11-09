@@ -1,0 +1,20 @@
+================================================
+        VOID LICENSE HUB — PAYMENT RECEIPT      
+================================================
+Receipt No      : VOID-RCP-2026-0001
+Date Issued     : 2026-11-09T08:29:42.226Z
+Status          : PAID
+------------------------------------------------
+Account         : @reseller
+Customer Name   : Reseller Partner Tier 1
+Issued By       : @owner
+------------------------------------------------
+Item / Summary  : 250 Reseller Credits Pack (25x 24H Keys Equivalent)
+Credits Granted : +250 CR
+Amount Paid     : 25.00 USD
+Payment Method  : USDT (TRC20)
+Transaction Ref : TXN-984120A7F
+Memo / Note     : Initial Reseller Credit Pack Settlement
+================================================
+   1 KEY = 1 DEVICE HARDWARE LOCK GUARANTEED    
+================================================

@@ -12,7 +12,6 @@ export const UserController = {
   },
 
   async createUser(req: Request): Promise<Response> {
-    // Only Owner and Admin can create users
     const authRes = requireRole(req, ["owner", "admin"]);
     if (authRes instanceof Response) return authRes;
 
@@ -46,15 +45,14 @@ export const UserController = {
     const authRes = requireAuth(req);
     if (authRes instanceof Response) return authRes;
 
-    const user = UserService.getUserById(id);
-    if (!user) return errorResponse("User not found", 404);
-
-    // Resellers can only see self
     if (authRes.user.role === "reseller" && authRes.user.id !== id) {
       return errorResponse("Access denied", 403);
     }
 
-    return jsonResponse({ success: true, user });
+    const details = UserService.getUserAnalytics(id);
+    if (!details) return errorResponse("User not found", 404);
+
+    return jsonResponse({ success: true, ...details });
   },
 
   async updateUserStatus(req: Request, id: number): Promise<Response> {
@@ -89,6 +87,22 @@ export const UserController = {
     }
 
     return jsonResponse({ success: true, message: "User deleted successfully" });
+  },
+
+  async bulkAction(req: Request): Promise<Response> {
+    const authRes = requireRole(req, ["owner", "admin"]);
+    if (authRes instanceof Response) return authRes;
+
+    try {
+      const body = await req.json();
+      const { action, userIds } = body;
+      if (!action) return errorResponse("action is required", 400);
+
+      const res = UserService.bulkUsersAction(action, Array.isArray(userIds) ? userIds : [], authRes.user);
+      return jsonResponse(res, res.success ? 200 : 400);
+    } catch (err: any) {
+      return errorResponse(err.message || "Bulk user operation failed", 500);
+    }
   },
 
   async resetPassword(req: Request, id: number): Promise<Response> {

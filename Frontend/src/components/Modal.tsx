@@ -6,6 +6,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   subtitle?: string;
+  eyebrow?: string;
   children: React.ReactNode;
   icon?: React.ReactNode;
   maxWidth?: string;
@@ -16,6 +17,7 @@ export const Modal: React.FC<ModalProps> = ({
   onClose,
   title,
   subtitle,
+  eyebrow,
   children,
   icon,
   maxWidth = "max-w-lg",
@@ -37,47 +39,51 @@ export const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
+        className="fixed inset-0 bg-black/65 backdrop-blur-[4px] transition-opacity"
         onClick={onClose}
       />
 
-      {/* Dialog Body */}
       <div
-        className={`relative z-10 w-full ${maxWidth} p-6 sm:p-8 rounded-lg bg-[var(--surface-solid)] border border-[var(--border)] text-[var(--ink)] shadow-2xl transition-all`}
+        className={`relative z-10 w-full ${maxWidth} my-auto max-h-[92vh] overflow-y-auto rounded-[10px] bg-[var(--surface-solid)] border border-[var(--border)] text-[var(--ink)] shadow-[0_24px_64px_rgba(0,0,0,0.45)] transition-all`}
         role="dialog"
         aria-modal="true"
       >
-        {/* Corner close */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1 rounded-md text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-hover)] transition-colors"
-          aria-label="Close dialog"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        {/* Optional Icon */}
-        {icon && (
-          <div className="w-10 h-10 mx-auto mb-3 flex items-center justify-center rounded-full border border-[var(--border-soft)] bg-[var(--surface)] text-[var(--accent)]">
-            {icon}
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--line)] bg-[var(--surface)]">
+          <div className="flex items-center gap-3 min-w-0">
+            {icon && (
+              <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md border border-[var(--border-soft)] bg-[var(--surface-hover)] text-[var(--accent)]">
+                {icon}
+              </div>
+            )}
+            <div className="min-w-0">
+              {eyebrow && (
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted)]">
+                  {eyebrow}
+                </div>
+              )}
+              <h2 className="text-base font-semibold tracking-tight text-[var(--ink)] leading-snug">
+                {title}
+              </h2>
+              {subtitle && (
+                <p className="text-xs text-[var(--muted)] mt-0.5 leading-relaxed">
+                  {subtitle}
+                </p>
+              )}
+            </div>
           </div>
-        )}
 
-        {/* Title */}
-        <h2 className="font-display text-2xl text-center font-normal mb-1 tracking-tight">
-          {title}
-        </h2>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md border border-transparent hover:border-[var(--border-soft)] text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
+            aria-label="Close dialog"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
-        {subtitle && (
-          <p className="text-xs text-center text-[var(--muted)] mb-5">
-            {subtitle}
-          </p>
-        )}
-
-        <div className="mt-4">{children}</div>
+        <div className="p-6">{children}</div>
       </div>
     </div>
   );

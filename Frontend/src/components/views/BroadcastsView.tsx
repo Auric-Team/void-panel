@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { api, AnnouncementRecord, AppSettings } from "../../lib/api";
 import { useToast } from "../Toast";
 import { Modal } from "../Modal";
-import { Radio, AlertOctagon, Plus, Trash2, Power, Bell, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Radio, Plus, Trash2, Power, RefreshCw } from "lucide-react";
 
 export const BroadcastsView: React.FC = () => {
   const { toast } = useToast();
@@ -53,7 +53,7 @@ export const BroadcastsView: React.FC = () => {
       });
       setSettings(res.settings);
       toast(
-        nextMode ? "🚨 Remote Maintenance Mode ACTIVATED" : "✅ Normal Service RESTORED",
+        nextMode ? "Remote Maintenance Mode ACTIVATED" : "Normal Service RESTORED",
         nextMode ? "error" : "success",
         nextMode ? "All non-owner client launches are blocked." : "Clients can now authenticate normally."
       );
@@ -106,141 +106,124 @@ export const BroadcastsView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Remote Maintenance Mode Kill Switch Card */}
-      <div
-        className={`p-5 rounded-lg border transition-all shadow-sm ${
-          settings?.maintenance_mode
-            ? "border-rose-500/50 bg-rose-500/10 text-[var(--ink)]"
-            : "border-[var(--border-soft)] bg-[var(--surface-solid)]"
-        }`}
-      >
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div
-              className={`w-9 h-9 rounded-md flex items-center justify-center shrink-0 ${
-                settings?.maintenance_mode ? "bg-rose-500 text-white" : "bg-[var(--surface)] text-[var(--muted)]"
-              }`}
-            >
-              <Power className="w-5 h-5" />
-            </div>
+      <div className="ref-panel p-6 sm:p-7">
+        <div className="ref-section-head">
+          <div className="flex items-start gap-4">
+            <span className="ref-section-number">01</span>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-display text-base font-medium">Remote Killswitch & Maintenance Gate</h3>
-                <span
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-                    settings?.maintenance_mode
-                      ? "bg-rose-600 text-white border-rose-500"
-                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                  }`}
-                >
-                  {settings?.maintenance_mode ? "EMERGENCY LOCKDOWN ACTIVE" : "GATEWAYS ONLINE"}
-                </span>
-              </div>
-              <p className="text-xs text-[var(--muted)] mt-0.5">
-                When enabled, all client launches are instantly blocked with the emergency message below.
-              </p>
+              <div className="ref-eyebrow">Global Gate Control</div>
+              <h2 className="text-2xl font-display tracking-tight flex items-center gap-2.5">
+                Remote Killswitch & Maintenance Gate
+              </h2>
             </div>
           </div>
-
-          <button
-            onClick={handleToggleMaintenance}
-            disabled={updatingMaint}
-            className={`px-4 py-2 text-xs font-semibold rounded-md shadow transition-all ${
-              settings?.maintenance_mode
-                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                : "bg-rose-600 hover:bg-rose-700 text-white"
-            }`}
-          >
-            {settings?.maintenance_mode ? "Deactivate Lockdown" : "Trigger Emergency Lockdown"}
-          </button>
+          <div className="flex items-center gap-2">
+            <span className={`ref-badge ${settings?.maintenance_mode ? "danger" : "success"}`}>
+              <span className="dot" />
+              {settings?.maintenance_mode ? "EMERGENCY LOCKDOWN ACTIVE" : "GATEWAYS ONLINE"}
+            </span>
+            <button
+              onClick={handleToggleMaintenance}
+              disabled={updatingMaint}
+              className={`ref-btn ${settings?.maintenance_mode ? "primary" : "solid-danger"}`}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>{settings?.maintenance_mode ? "Deactivate Lockdown" : "Trigger Emergency Lockdown"}</span>
+            </button>
+          </div>
         </div>
 
+        <p className="text-xs text-[var(--muted)] mb-4">
+          When enabled, all client launches are immediately blocked at the verification gateway with the lockdown notice below.
+        </p>
+
         {/* Maintenance Message Input */}
-        <div className="mt-4 pt-3 border-t border-[var(--line)]">
-          <label className="block text-[10px] uppercase font-mono text-[var(--muted)] mb-1">
-            Lockdown Reason / Notice to Game Clients:
+        <div className="ref-card p-4">
+          <label className="ref-label">
+            Lockdown Reason / Notice to Game Clients
           </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={maintMsg}
-              onChange={(e) => setMaintMsg(e.target.value)}
-              placeholder="e.g. Game patch detected. Anti-cheat offsets updating..."
-              className="flex-1 px-3 py-1.5 text-xs rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
-            />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="ref-input-wrap flex-1">
+              <input
+                type="text"
+                value={maintMsg}
+                onChange={(e) => setMaintMsg(e.target.value)}
+                placeholder="e.g. Game patch detected. Anti-cheat offsets updating..."
+              />
+            </div>
             <button
               onClick={async () => {
                 await api.updateSettings({ maintenance_message: maintMsg });
                 toast("Lockdown notice updated", "success");
               }}
-              className="px-3 py-1.5 text-xs rounded border border-[var(--border-soft)] hover:bg-[var(--surface)] text-[var(--ink)]"
+              className="ref-btn"
             >
-              Save Message
+              Save Notice
             </button>
           </div>
         </div>
       </div>
 
-      {/* Broadcasts Manager Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-gradient)] shadow-sm">
-        <div>
-          <h2 className="text-lg font-display tracking-tight font-medium flex items-center gap-2">
-            <Radio className="w-5 h-5 text-amber-500" />
-            In-Game Announcements & Remote Broadcasts
-          </h2>
-          <p className="text-xs text-[var(--muted)] mt-0.5">
-            Push real-time banners and notifications directly to players in the mod menu client.
-          </p>
+      {/* Broadcasts Manager */}
+      <div className="ref-panel p-6 sm:p-7">
+        <div className="ref-section-head">
+          <div className="flex items-start gap-4">
+            <span className="ref-section-number">02</span>
+            <div>
+              <div className="ref-eyebrow">Live Client Messaging</div>
+              <h2 className="text-2xl font-display tracking-tight">
+                In-Game Announcements & Remote Broadcasts
+              </h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={loadData} className="ref-btn">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <button onClick={() => setModalOpen(true)} className="ref-btn primary">
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Broadcast</span>
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-md bg-[var(--accent)] text-[var(--accent-ink)] hover:bg-[var(--accent-bright)] shadow-sm transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Broadcast</span>
-        </button>
-      </div>
 
-      {/* Announcements List */}
-      <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--surface-solid)] overflow-hidden shadow-sm">
-        <div className="divide-y divide-[var(--line)]">
+        <div className="space-y-3">
           {announcements.length === 0 ? (
-            <div className="p-8 text-center text-xs text-[var(--muted)]">
-              No broadcasts created yet. Publish an announcement to broadcast to all clients.
+            <div className="ref-card p-8 text-center text-xs text-[var(--muted)]">
+              No broadcasts created yet. Publish an announcement to broadcast to all connected clients.
             </div>
           ) : (
             announcements.map((a) => {
               const isActive = Boolean(a.is_active);
               return (
-                <div key={a.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-[var(--surface-hover)] transition-colors">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                <div
+                  key={a.id}
+                  className="ref-card p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border ${
+                        className={`ref-badge ${
                           a.severity === "critical"
-                            ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                            ? "danger"
                             : a.severity === "warning"
-                            ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                            : "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                            ? "warning"
+                            : "info"
                         }`}
                       >
-                        {a.severity}
+                        <span className="dot" />
+                        {a.severity.toUpperCase()}
                       </span>
-                      <strong className="text-xs font-semibold text-[var(--ink)]">
+                      <strong className="text-sm font-semibold text-[var(--ink)]">
                         {a.title}
                       </strong>
-                      <span
-                        className={`text-[10px] px-2 py-0.2 rounded-full border ${
-                          isActive
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                            : "bg-gray-500/10 text-gray-400 border-gray-500/30"
-                        }`}
-                      >
-                        {isActive ? "Broadcasting" : "Inactive"}
+                      <span className={`ref-badge ${isActive ? "success" : ""}`}>
+                        <span className="dot" />
+                        {isActive ? "Broadcasting" : "Paused"}
                       </span>
                     </div>
-                    <p className="text-xs text-[var(--muted)]">
-                      {a.content}
-                    </p>
+                    <p className="text-xs text-[var(--muted)]">{a.content}</p>
                     <span className="block text-[10px] font-mono text-[var(--muted)]">
                       Published {new Date(a.created_at).toLocaleString()}
                     </span>
@@ -249,17 +232,14 @@ export const BroadcastsView: React.FC = () => {
                   <div className="flex items-center gap-2 self-end sm:self-center">
                     <button
                       onClick={() => handleToggleActive(a.id)}
-                      className={`px-3 py-1.5 text-xs rounded border transition-colors ${
-                        isActive
-                          ? "border-[var(--border-soft)] hover:bg-[var(--surface)] text-[var(--muted)]"
-                          : "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                      }`}
+                      className={`ref-btn !py-1.5 !px-3 ${isActive ? "" : "primary"}`}
                     >
-                      {isActive ? "Deactivate" : "Activate"}
+                      {isActive ? "Pause" : "Activate"}
                     </button>
                     <button
                       onClick={() => handleDelete(a.id)}
-                      className="p-1.5 rounded border border-[var(--border-soft)] hover:bg-rose-500/10 hover:text-rose-500 text-[var(--muted)] transition-colors"
+                      className="ref-btn danger !py-1.5 !px-2.5"
+                      title="Delete Broadcast"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -272,65 +252,61 @@ export const BroadcastsView: React.FC = () => {
       </div>
 
       {/* New Broadcast Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Publish Live In-Game Broadcast">
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Publish Live In-Game Broadcast"
+        eyebrow="Client Telemetry Feed"
+      >
         <form onSubmit={handleCreateAnnouncement} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium mb-1 font-mono uppercase text-[10px]">
-              Broadcast Title
-            </label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Maintenance Notice / Feature Update"
-              className="w-full px-3 py-2 text-xs rounded border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
-            />
+            <label className="ref-label">Broadcast Title</label>
+            <div className="ref-input-wrap">
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Maintenance Notice / Feature Update"
+              />
+            </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium mb-1 font-mono uppercase text-[10px]">
-              Severity Level
-            </label>
-            <select
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as any)}
-              className="w-full px-3 py-2 text-xs rounded border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] font-mono focus:outline-none focus:border-[var(--accent)]"
-            >
-              <option value="info">Info (Standard announcement banner)</option>
-              <option value="warning">Warning (Yellow priority alert)</option>
-              <option value="critical">Critical (Red urgent notification)</option>
-            </select>
+            <label className="ref-label">Severity Level</label>
+            <div className="ref-input-wrap">
+              <select
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as any)}
+                className="font-mono"
+              >
+                <option value="info">Info (Standard announcement banner)</option>
+                <option value="warning">Warning (Amber priority alert)</option>
+                <option value="critical">Critical (Red urgent notification)</option>
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium mb-1 font-mono uppercase text-[10px]">
-              Announcement Body
-            </label>
-            <textarea
-              required
-              rows={3}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Detailed message displayed on the player's screen upon mod menu connection..."
-              className="w-full px-3 py-2 text-xs rounded border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
-            />
+            <label className="ref-label">Announcement Body</label>
+            <div className="ref-input-wrap !h-auto py-2">
+              <textarea
+                required
+                rows={3}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="Detailed message displayed on the player's screen upon mod menu connection..."
+              />
+            </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setModalOpen(false)}
-              className="px-3 py-1.5 text-xs rounded border border-[var(--border-soft)] hover:bg-[var(--surface)]"
-            >
+          <div className="flex justify-end gap-2 pt-3 border-t border-[var(--line)]">
+            <button type="button" onClick={() => setModalOpen(false)} className="ref-btn">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-1.5 text-xs rounded bg-[var(--accent)] text-[var(--accent-ink)] hover:bg-[var(--accent-bright)]"
-            >
-              {submitting ? "Publishing..." : "Broadcast to Clients"}
+            <button type="submit" disabled={submitting} className="ref-btn primary">
+              <Radio className="w-3.5 h-3.5" />
+              <span>{submitting ? "Publishing..." : "Broadcast to Clients"}</span>
             </button>
           </div>
         </form>

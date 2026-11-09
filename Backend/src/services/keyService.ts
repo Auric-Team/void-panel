@@ -5,7 +5,9 @@ import { CreditService } from "./creditService.js";
 import { BanService } from "./banService.js";
 import { AnnouncementService } from "./announcementService.js";
 import { SettingsService } from "./settingsService.js";
-import type { KeyRecord, VerifyResult, UserPublicProfile } from "../types/index.js";
+import { ReceiptService } from "./receiptService.js";
+import { NotificationService } from "./notificationService.js";
+import type { KeyRecord, VerifyResult, UserPublicProfile, KeyReceiptInput, PaymentReceiptRecord } from "../types/index.js";
 
 export { computeSha256, generateKeyString };
 
@@ -202,15 +204,16 @@ export const KeyService = {
   },
 
   /**
-   * Create single key with automated credit deduction for resellers
+   * Create single key with automated credit deduction for resellers, optional payment receipt & proof, and Owner dispatch
    */
   createKey(
     durationDays = 30,
     note = "",
     customKey?: string,
     maxResets = 3,
-    creator?: UserPublicProfile
-  ): { success: boolean; key?: KeyRecord; error?: string; creditCost?: number } {
+    creator?: UserPublicProfile,
+    receipt?: KeyReceiptInput
+  ): { success: boolean; key?: KeyRecord; receipt?: PaymentReceiptRecord; error?: string; creditCost?: number } {
     const cost = getCreditCostForDuration(durationDays);
     const keyStr = (customKey || generateKeyString("VOID")).trim().toUpperCase();
 
@@ -219,6 +222,8 @@ export const KeyService = {
     if (exists) {
       return { success: false, error: "A key with this string already exists." };
     }
+
+    let balanceAfter = creator ? CreditService.getBalance(creator.id) : 999999;
 
     // Credit validation and deduction for Resellers & Admins (Owner has free generation)
     if (creator && creator.role !== "owner") {
@@ -233,13 +238,49 @@ export const KeyService = {
       if (!deduction.success) {
         return { success: false, error: deduction.error, creditCost: cost };
       }
+      balanceAfter = deduction.newBalance ?? 0;
+    }
+
+    const customerName = (receipt?.customerName || "").trim();
+    const amountPaid = Math.max(0, Number(receipt?.amountPaid) || 0);
+    const currency = (receipt?.currency || "USD").toUpperCase();
+    const paymentMethod = (receipt?.paymentMethod || "").trim();
+    const paymentRef = (receipt?.transactionRef || "").trim();
+    const proofImage = (receipt?.proofImage || "").trim();
+
+    let createdReceipt: PaymentReceiptRecord | undefined;
+    if (creator && (amountPaid > 0 || proofImage || paymentMethod || paymentRef || customerName)) {
+      const recRes = ReceiptService.createReceipt(
+        {
+          userId: creator.id,
+          username: creator.username,
+          customerName: customerName || note || "Direct Buyer",
+          amountPaid,
+          currency,
+          creditsGranted: 0,
+          keysSummary: `1x ${durationDays === 0 ? "Lifetime" : durationDays + "D"} Key (${keyStr})`,
+          paymentMethod: paymentMethod || "UPI / Crypto",
+          transactionRef: paymentRef,
+          proofImage,
+          keyStr,
+          status: "paid",
+          note,
+          autoGrantCredits: false,
+        },
+        creator
+      );
+      if (recRes.success && recRes.receipt) {
+        createdReceipt = recRes.receipt;
+      }
     }
 
     const now = Date.now();
     const insert = db.run(
       `INSERT INTO keys (
-        key_str, status, duration_days, credit_cost, created_at, note, max_resets, reset_count, created_by_id, created_by_name
-      ) VALUES (?, 'active', ?, ?, ?, ?, ?, 0, ?, ?)`,
+        key_str, status, duration_days, credit_cost, created_at, note, max_resets, reset_count,
+        created_by_id, created_by_name, customer_name, payment_amount, payment_currency,
+        payment_method, payment_ref, proof_image, receipt_id
+      ) VALUES (?, 'active', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         keyStr,
         durationDays,
@@ -249,26 +290,57 @@ export const KeyService = {
         maxResets,
         creator?.id || null,
         creator?.username || "system",
+        customerName,
+        amountPaid,
+        currency,
+        paymentMethod,
+        paymentRef,
+        proofImage,
+        createdReceipt?.id || null,
       ]
     );
 
     const createdKey = db.query("SELECT * FROM keys WHERE id = ?").get(insert.lastInsertRowid) as KeyRecord;
-    return { success: true, key: createdKey, creditCost: creator?.role === "owner" ? 0 : cost };
+    const effectiveCost = creator?.role === "owner" ? 0 : cost;
+
+    // Notify Owner with complete key creation intelligence + payment receipt
+    NotificationService.recordKeyCreation({
+      eventType: "key_created",
+      creator,
+      quantity: 1,
+      durationDays,
+      creditCost: effectiveCost,
+      balanceAfter,
+      maxResets,
+      keysList: [keyStr],
+      note,
+      receipt,
+      receiptNo: createdReceipt?.receipt_no,
+    });
+
+    return {
+      success: true,
+      key: createdKey,
+      receipt: createdReceipt,
+      creditCost: effectiveCost,
+    };
   },
 
   /**
-   * Batch key generation with total credit calculation and deduction
+   * Batch key generation with total credit calculation, optional payment receipt, and Owner dispatch
    */
   createBatchKeys(
     count: number,
     durationDays: number,
     note: string,
     prefix: string,
-    creator?: UserPublicProfile
-  ): { success: boolean; keys?: KeyRecord[]; totalCost?: number; error?: string } {
+    creator?: UserPublicProfile,
+    receipt?: KeyReceiptInput
+  ): { success: boolean; keys?: KeyRecord[]; receipt?: PaymentReceiptRecord; totalCost?: number; error?: string } {
     const safeCount = Math.min(Math.max(1, count), 500);
     const costPerKey = getCreditCostForDuration(durationDays);
     const totalCost = costPerKey * safeCount;
+    let balanceAfter = creator ? CreditService.getBalance(creator.id) : 999999;
 
     // Check if creator can afford entire batch
     if (creator && creator.role !== "owner") {
@@ -291,25 +363,93 @@ export const KeyService = {
       if (!deduction.success) {
         return { success: false, error: deduction.error, totalCost };
       }
+      balanceAfter = deduction.newBalance ?? 0;
+    }
+
+    const customerName = (receipt?.customerName || "").trim();
+    const amountPaid = Math.max(0, Number(receipt?.amountPaid) || 0);
+    const currency = (receipt?.currency || "USD").toUpperCase();
+    const paymentMethod = (receipt?.paymentMethod || "").trim();
+    const paymentRef = (receipt?.transactionRef || "").trim();
+    const proofImage = (receipt?.proofImage || "").trim();
+
+    let createdReceipt: PaymentReceiptRecord | undefined;
+    if (creator && (amountPaid > 0 || proofImage || paymentMethod || paymentRef || customerName)) {
+      const recRes = ReceiptService.createReceipt(
+        {
+          userId: creator.id,
+          username: creator.username,
+          customerName: customerName || note || "Batch Buyer",
+          amountPaid,
+          currency,
+          creditsGranted: 0,
+          keysSummary: `${safeCount}x ${durationDays === 0 ? "Lifetime" : durationDays + "D"} Keys Batch`,
+          paymentMethod: paymentMethod || "UPI / Crypto",
+          transactionRef: paymentRef,
+          proofImage,
+          keyStr: `BATCH-${safeCount}X`,
+          status: "paid",
+          note,
+          autoGrantCredits: false,
+        },
+        creator
+      );
+      if (recRes.success && recRes.receipt) {
+        createdReceipt = recRes.receipt;
+      }
     }
 
     const keys: KeyRecord[] = [];
+    const keyStrings: string[] = [];
     const now = Date.now();
 
     for (let i = 0; i < safeCount; i++) {
       const keyStr = generateKeyString(prefix);
+      keyStrings.push(keyStr);
       const res = db.run(
         `INSERT INTO keys (
-          key_str, status, duration_days, credit_cost, created_at, note, max_resets, reset_count, created_by_id, created_by_name
-        ) VALUES (?, 'active', ?, ?, ?, ?, 3, 0, ?, ?)`,
-        [keyStr, durationDays, costPerKey, now, note, creator?.id || null, creator?.username || "system"]
+          key_str, status, duration_days, credit_cost, created_at, note, max_resets, reset_count,
+          created_by_id, created_by_name, customer_name, payment_amount, payment_currency,
+          payment_method, payment_ref, proof_image, receipt_id
+        ) VALUES (?, 'active', ?, ?, ?, ?, 3, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          keyStr,
+          durationDays,
+          costPerKey,
+          now,
+          note,
+          creator?.id || null,
+          creator?.username || "system",
+          customerName,
+          amountPaid,
+          currency,
+          paymentMethod,
+          paymentRef,
+          proofImage,
+          createdReceipt?.id || null,
+        ]
       );
 
       const k = db.query("SELECT * FROM keys WHERE id = ?").get(res.lastInsertRowid) as KeyRecord;
       keys.push(k);
     }
 
-    return { success: true, keys, totalCost };
+    const effectiveCost = creator?.role === "owner" ? 0 : totalCost;
+    NotificationService.recordKeyCreation({
+      eventType: "batch_created",
+      creator,
+      quantity: safeCount,
+      durationDays,
+      creditCost: effectiveCost,
+      balanceAfter,
+      maxResets: 3,
+      keysList: keyStrings,
+      note,
+      receipt,
+      receiptNo: createdReceipt?.receipt_no,
+    });
+
+    return { success: true, keys, receipt: createdReceipt, totalCost };
   },
 
   getAllKeys(filters?: { search?: string; status?: string; limit?: number; offset?: number }, currentUser?: UserPublicProfile) {
@@ -319,8 +459,8 @@ export const KeyService = {
     // Role Scoping:
     // Reseller can only see keys they created
     if (currentUser?.role === "reseller") {
-      sql += " AND created_by_id = ?";
-      params.push(currentUser.id);
+      sql += " AND (created_by_id = ? OR LOWER(created_by_name) = LOWER(?))";
+      params.push(currentUser.id, currentUser.username);
     }
 
     if (filters?.search) {
@@ -418,11 +558,18 @@ export const KeyService = {
   },
 
   bulkAction(
-    action: "pause" | "activate" | "extend" | "reset_hwid" | "delete",
+    action: "pause" | "activate" | "extend" | "reset_hwid" | "delete" | "delete_all" | "delete_expired" | "delete_unbound",
     keyIds: number[],
     extraDays = 30,
     currentUser?: UserPublicProfile
   ): { success: boolean; affected: number; message: string } {
+    if (action === "delete_all" || action === "delete_expired" || action === "delete_unbound") {
+      return this.deleteAllKeys(
+        action === "delete_expired" ? "expired" : action === "delete_unbound" ? "unbound" : "all",
+        currentUser
+      );
+    }
+
     if (!keyIds || keyIds.length === 0) {
       return { success: false, affected: 0, message: "No keys specified" };
     }
@@ -433,7 +580,7 @@ export const KeyService = {
       if (!key) continue;
 
       // Reseller permission boundary
-      if (currentUser?.role === "reseller" && key.created_by_id !== currentUser.id) {
+      if (currentUser?.role === "reseller" && key.created_by_id !== currentUser.id && key.created_by_name !== currentUser.username) {
         continue;
       }
 
@@ -461,6 +608,38 @@ export const KeyService = {
       success: true,
       affected,
       message: `Successfully executed bulk ${action} on ${affected} license key(s).`,
+    };
+  },
+
+  deleteAllKeys(
+    filter: "all" | "expired" | "unbound" | "paused" = "all",
+    currentUser?: UserPublicProfile
+  ): { success: boolean; affected: number; message: string } {
+    let whereSql = "WHERE 1=1";
+    const params: any[] = [];
+
+    if (currentUser?.role === "reseller") {
+      whereSql += " AND (created_by_id = ? OR LOWER(created_by_name) = LOWER(?))";
+      params.push(currentUser.id, currentUser.username);
+    }
+
+    if (filter === "expired") {
+      whereSql += " AND status = 'expired'";
+    } else if (filter === "paused") {
+      whereSql += " AND status = 'paused'";
+    } else if (filter === "unbound") {
+      whereSql += " AND (hwid IS NULL OR hwid = '')";
+    }
+
+    const countRow = db.query(`SELECT COUNT(*) as c FROM keys ${whereSql}`).get(...params) as { c: number };
+    const affected = countRow?.c || 0;
+
+    db.run(`DELETE FROM keys ${whereSql}`, params);
+
+    return {
+      success: true,
+      affected,
+      message: `Deleted ${affected} license key(s) (${filter}).`,
     };
   },
 };

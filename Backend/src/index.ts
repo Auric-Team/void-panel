@@ -1,9 +1,15 @@
 import { initDatabase } from "./db/database.js";
+import { ReceiptService } from "./services/receiptService.js";
 import { handleRequest } from "./routes/index.js";
 import { CONFIG } from "./config/index.js";
 
 // Initialize SQLite database and tables
 initDatabase();
+
+const isTesting = process.env.NODE_ENV === "test" || process.argv.some((a) => a.includes("test"));
+if (!isTesting) {
+  ReceiptService.syncAllReceiptsToDisk();
+}
 
 export function createServer(port = CONFIG.PORT) {
   return Bun.serve({
@@ -33,7 +39,6 @@ export function createServer(port = CONFIG.PORT) {
 }
 
 // Only auto-start on fixed port when run directly (not during test suites)
-const isTesting = process.env.NODE_ENV === "test" || process.argv.some((a) => a.includes("test"));
 export const server = createServer(isTesting ? 0 : (Number(process.env.PORT) || CONFIG.PORT));
 
 if (!isTesting) {

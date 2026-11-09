@@ -1,7 +1,24 @@
-import React, { useState, useEffect } from "react";
-import { api, KeyRecord } from "../../lib/api";
+import React, { useState } from "react";
+import {
+  api,
+  KeyRecord,
+  PaymentReceiptRecord,
+  copyToClipboard,
+  printReceiptWindow,
+} from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
-import { Sparkles, Copy, Download, RefreshCw, Coins, AlertCircle } from "lucide-react";
+import {
+  Sparkles,
+  Copy,
+  Check,
+  Download,
+  RefreshCw,
+  AlertCircle,
+  Receipt,
+  Upload,
+  X,
+  Printer,
+} from "lucide-react";
 import { useToast } from "../Toast";
 
 interface BatchGeneratorViewProps {
@@ -16,10 +33,20 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
   const [prefix, setPrefix] = useState("VOID");
   const [durationDays, setDurationDays] = useState(1);
   const [note, setNote] = useState("");
+
+  // Payment Receipt fields for Batch Minting
+  const [customerName, setCustomerName] = useState("");
+  const [amountPaid, setAmountPaid] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [transactionRef, setTransactionRef] = useState("");
+  const [proofImage, setProofImage] = useState("");
+
   const [generating, setGenerating] = useState(false);
   const [generatedKeys, setGeneratedKeys] = useState<KeyRecord[]>([]);
+  const [generatedReceipt, setGeneratedReceipt] = useState<PaymentReceiptRecord | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Credit calculation
   const getUnitCost = (days: number) => {
     if (days === 1) return 10;
     if (days === 3) return 25;
@@ -35,6 +62,20 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
   const totalCost = unitCost * count;
   const canAfford = role === "owner" || credits >= totalCost;
 
+  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast("Image too large", "error", "Please select an image smaller than 5 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setProofImage(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canAfford) {
@@ -44,10 +85,27 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
 
     setGenerating(true);
     try {
-      const res = await api.createBatchKeys(count, durationDays, prefix, note);
+      const receiptPayload =
+        customerName.trim() || Number(amountPaid) > 0 || transactionRef.trim() || proofImage
+          ? {
+              customerName: customerName.trim(),
+              amountPaid: Number(amountPaid) || 0,
+              currency,
+              paymentMethod,
+              transactionRef: transactionRef.trim(),
+              proofImage,
+            }
+          : undefined;
+
+      const res = await api.createBatchKeys(count, durationDays, prefix, note, receiptPayload);
       if (res.success && res.keys) {
         setGeneratedKeys(res.keys);
-        toast(`Minted ${res.count} keys! (${totalCost} credits)`, "success");
+        setGeneratedReceipt(res.receipt || null);
+        toast(
+          `Minted ${res.count} keys & dispatched to Owner!`,
+          "success",
+          `Cost: ${role === "owner" ? 0 : totalCost} credits`
+        );
         refreshProfile();
         onSuccess();
       }
@@ -58,11 +116,26 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
     }
   };
 
-  const handleCopyAll = () => {
+  const handleCopyAll = async () => {
     if (generatedKeys.length === 0) return;
     const txt = generatedKeys.map((k) => k.key_str).join("\n");
-    navigator.clipboard.writeText(txt);
-    toast("All batch keys copied to clipboard!", "success");
+    const ok = await copyToClipboard(txt);
+    if (ok) {
+      setCopiedKey("ALL");
+      setTimeout(() => setCopiedKey(null), 1600);
+      toast(`All ${generatedKeys.length} batch keys copied to clipboard!`, "success");
+    } else {
+      toast("Failed to copy batch keys", "error");
+    }
+  };
+
+  const handleCopySingle = async (keyStr: string) => {
+    const ok = await copyToClipboard(keyStr);
+    if (ok) {
+      setCopiedKey(keyStr);
+      setTimeout(() => setCopiedKey(null), 1500);
+      toast(`Key ${keyStr} copied!`, "success");
+    }
   };
 
   const handleDownloadTxt = () => {
@@ -81,76 +154,85 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Left Form: Configuration */}
-      <div className="p-6 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-solid)] shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-8 h-8 rounded-full border border-[var(--border-soft)] bg-[var(--surface)] flex items-center justify-center text-amber-500">
-            <Sparkles className="w-4 h-4" />
+      <div className="ref-panel p-6">
+        <div className="ref-section-head">
+          <div className="flex items-start gap-3">
+            <span className="ref-section-number">01</span>
+            <div>
+              <div className="ref-eyebrow">Bulk Provisioning</div>
+              <h2>Batch Key Generator &amp; Payment Receipt</h2>
+            </div>
           </div>
-          <h2 className="font-display text-xl font-normal">
-            Batch Key Generator
-          </h2>
+          <span className="ref-badge info text-[10px]">Auto-Dispatches to Owner</span>
         </div>
-        <p className="text-xs text-[var(--muted)] mb-5">
-          Mint multiple synchronized keys simultaneously for VIP customers or resellers.
-        </p>
 
         {/* Credit Cost Estimate Capsule */}
-        <div className="p-3.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface)] mb-5 space-y-2 text-xs">
+        <div className="p-4 rounded-lg border border-[var(--border-soft)] bg-[var(--surface)] mb-5 space-y-2 text-xs font-mono">
           <div className="flex items-center justify-between">
-            <span className="text-[var(--muted)]">Unit Rate ({durationDays === 1 ? "24 Hours" : `${durationDays} Days`}):</span>
-            <span className="font-mono font-medium">{unitCost} Credits / Key</span>
+            <span className="text-[var(--muted)]">
+              Unit Rate ({durationDays === 0 ? "Lifetime" : durationDays === 1 ? "24 Hours" : `${durationDays} Days`}):
+            </span>
+            <span className="font-semibold">{unitCost} CR / Key</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[var(--muted)]">Quantity:</span>
-            <span className="font-mono font-medium">{count} Keys</span>
+            <span className="font-semibold">{count} Keys</span>
           </div>
           <div className="border-t border-[var(--line)] pt-2 flex items-center justify-between">
             <span className="font-medium text-[var(--ink)]">Total Required Credits:</span>
-            <span className="font-mono font-bold text-amber-500 text-sm">
+            <span className="font-bold text-amber-500 text-sm">
               {role === "owner" ? "0 (Owner Free)" : `${totalCost} Credits`}
             </span>
           </div>
           {role !== "owner" && (
             <div className="flex items-center justify-between text-[11px] text-[var(--muted)]">
-              <span>Your Current Balance:</span>
-              <span className={`font-mono font-medium ${credits >= totalCost ? "text-emerald-500" : "text-rose-500"}`}>
+              <span>Your Balance:</span>
+              <span className={credits >= totalCost ? "text-emerald-500 font-semibold" : "text-rose-500 font-semibold"}>
                 {credits} Credits
               </span>
             </div>
           )}
           {!canAfford && (
-            <div className="flex items-center gap-1.5 p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px]">
+            <div className="flex items-center gap-1.5 p-2 rounded bg-[var(--danger-fill)] border border-[var(--danger-border)] text-[var(--danger)] text-[11px]">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <span>Insufficient credits. Need {totalCost - credits} more credits.</span>
             </div>
           )}
         </div>
 
-        <form onSubmit={handleGenerate} className="space-y-4 text-xs font-ui">
-          {/* Prefix */}
-          <div>
-            <label className="block text-[var(--muted)] mb-1 font-mono uppercase text-[10px]">
-              Key Prefix
-            </label>
-            <input
-              type="text"
-              value={prefix}
-              onChange={(e) => setPrefix(e.target.value.toUpperCase())}
-              placeholder="e.g. VOID, RESELL, VIP"
-              className="w-full p-2.5 rounded-md border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] font-mono font-medium focus:outline-none focus:border-[var(--accent)]"
-              required
-            />
+        <form onSubmit={handleGenerate} className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="ref-label">Key Prefix</label>
+              <div className="ref-input-wrap">
+                <input
+                  type="text"
+                  value={prefix}
+                  onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+                  placeholder="e.g. VOID, RESELL, VIP"
+                  className="font-mono font-medium"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="ref-label">Batch Memo / Note</label>
+              <div className="ref-input-wrap">
+                <input
+                  type="text"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="e.g. Reseller Batch Alpha"
+                />
+              </div>
+            </div>
           </div>
 
-          {/* Quantity Slider */}
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="text-[var(--muted)] font-mono uppercase text-[10px]">
-                Quantity of Keys
-              </label>
-              <span className="font-mono font-bold text-[var(--ink)] text-sm">
-                {count} keys
-              </span>
+              <label className="ref-label !mb-0">Quantity of Keys</label>
+              <span className="font-mono font-bold text-[var(--ink)] text-sm">{count} keys</span>
             </div>
             <input
               type="range"
@@ -158,22 +240,13 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
               max="100"
               value={count}
               onChange={(e) => setCount(Number(e.target.value))}
-              className="w-full h-2 rounded-lg bg-[var(--track)] cursor-pointer accent-[var(--accent)]"
+              className="w-full cursor-pointer accent-[var(--accent)]"
             />
-            <div className="flex justify-between text-[10px] text-[var(--muted)] mt-1 font-mono">
-              <span>1</span>
-              <span>25</span>
-              <span>50</span>
-              <span>100</span>
-            </div>
           </div>
 
-          {/* Duration Presets */}
           <div>
-            <label className="block text-[var(--muted)] mb-1 font-mono uppercase text-[10px]">
-              Subscription Duration & Rate
-            </label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="ref-label">Subscription Duration &amp; Rate</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {[
                 { days: 1, label: "24 Hours (10 CR)" },
                 { days: 3, label: "3 Days (25 CR)" },
@@ -186,48 +259,152 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
                   key={d.days}
                   type="button"
                   onClick={() => setDurationDays(d.days)}
-                  className={`p-2 rounded border text-center transition-all ${
-                    durationDays === d.days
-                      ? "bg-[var(--accent)] text-[var(--accent-ink)] font-semibold border-transparent shadow-sm"
-                      : "bg-[var(--surface-solid)] text-[var(--ink)] border-[var(--border-soft)] hover:bg-[var(--surface)]"
+                  className={`ref-btn !px-2 font-mono text-[11px] ${
+                    durationDays === d.days ? "primary" : ""
                   }`}
                 >
-                  <span className="block text-[11px] font-mono">{d.label}</span>
+                  {d.label}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Campaign Note */}
-          <div>
-            <label className="block text-[var(--muted)] mb-1 font-mono uppercase text-[10px]">
-              Campaign / Customer Note (Optional)
-            </label>
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. Reseller Batch Alpha"
-              className="w-full p-2.5 rounded-md border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
-            />
+          {/* Receipt of Payment Section */}
+          <div className="p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] space-y-3">
+            <div className="flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-[var(--accent)]" />
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-wider">
+                Receipt of Payment &amp; Proof (Optional · Sent to Owner)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="ref-label">Buyer / Reseller Name</label>
+                <div className="ref-input-wrap">
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="e.g. @batch_buyer"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="col-span-2">
+                  <label className="ref-label">Amount Paid</label>
+                  <div className="ref-input-wrap">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={amountPaid}
+                      onChange={(e) => setAmountPaid(e.target.value)}
+                      placeholder="0.00"
+                      className="font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="ref-label">Curr</label>
+                  <div className="ref-input-wrap !px-2">
+                    <select
+                      value={currency}
+                      onChange={(e) => setCurrency(e.target.value)}
+                      className="font-mono"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="INR">INR</option>
+                      <option value="USDT">USDT</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="ref-label">Payment Method</label>
+                <div className="ref-input-wrap">
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="font-mono"
+                  >
+                    <option value="UPI">UPI / GPay</option>
+                    <option value="USDT / Crypto">USDT / Crypto</option>
+                    <option value="Binance Pay">Binance Pay</option>
+                    <option value="PayPal">PayPal</option>
+                    <option value="Card">Card</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="ref-label">Transaction ID / UTR</label>
+                <div className="ref-input-wrap">
+                  <input
+                    type="text"
+                    value={transactionRef}
+                    onChange={(e) => setTransactionRef(e.target.value)}
+                    placeholder="UTR / TXHash"
+                    className="font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {proofImage ? (
+              <div className="p-2 rounded border border-[var(--border)] bg-[var(--surface-solid)] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <img
+                    src={proofImage}
+                    alt="Payment Proof"
+                    className="w-10 h-10 object-cover rounded border border-[var(--border-soft)]"
+                  />
+                  <span className="font-mono text-[11px] text-[var(--success)] font-semibold">
+                    ✓ Payment Proof Screenshot Attached
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProofImage("")}
+                  className="ref-btn danger !min-h-[26px] !px-2 text-[10px]"
+                >
+                  <X className="w-3 h-3" /> Remove
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center justify-center gap-2 p-2.5 rounded border border-dashed border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-solid)] cursor-pointer text-[11px] text-[var(--muted)]">
+                <Upload className="w-3.5 h-3.5 text-[var(--accent)]" />
+                <span>Upload Payment Screenshot (PNG/JPG)</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleProofFileChange}
+                  className="hidden"
+                />
+              </label>
+            )}
           </div>
 
-          {/* Submit */}
           <div className="pt-2">
             <button
               type="submit"
               disabled={generating || !canAfford}
-              className="w-full py-2.5 px-4 rounded-md font-medium text-xs flex items-center justify-center gap-2 bg-[var(--accent)] text-[var(--accent-ink)] hover:bg-[var(--accent-bright)] shadow-md disabled:opacity-40 transition-all"
+              className="ref-btn primary w-full !min-h-[40px]"
             >
               {generating ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Minting Keys...
+                  <span>Minting &amp; Dispatching...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  Mint {count} Keys Now ({role === "owner" ? "Owner Free" : `${totalCost} Credits`})
+                  <span>
+                    Mint {count} Keys &amp; Dispatch to Owner ({role === "owner" ? "Owner Free" : `${totalCost} CR`})
+                  </span>
                 </>
               )}
             </button>
@@ -235,55 +412,95 @@ export const BatchGeneratorView: React.FC<BatchGeneratorViewProps> = ({ onSucces
         </form>
       </div>
 
-      {/* Right Column: Output & Batch Actions */}
-      <div className="p-6 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-solid)] shadow-sm flex flex-col justify-between">
+      {/* Right Column: Output & 1-Click Copy / Download */}
+      <div className="ref-panel p-6 flex flex-col justify-between">
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display text-lg font-normal">
-              Generated Batch Output
-            </h3>
+          <div className="ref-section-head">
+            <div className="flex items-start gap-3">
+              <span className="ref-section-number">02</span>
+              <div>
+                <div className="ref-eyebrow">Minted Output</div>
+                <h2>Generated Batch Keys</h2>
+              </div>
+            </div>
             {generatedKeys.length > 0 && (
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                {generatedKeys.length} Ready
+              <span className="ref-badge success font-mono text-[10px]">
+                {generatedKeys.length} Minted
               </span>
             )}
           </div>
 
           {generatedKeys.length > 0 ? (
             <div className="space-y-4">
-              <div className="p-3 rounded-md bg-[var(--surface)] border border-[var(--border-soft)] max-h-[380px] overflow-y-auto font-mono text-xs space-y-1.5 select-all">
-                {generatedKeys.map((k, idx) => (
-                  <div key={k.id} className="flex items-center justify-between py-1 border-b border-[var(--line)] last:border-0">
-                    <span className="text-[var(--ink)] font-medium">{k.key_str}</span>
-                    <span className="text-[10px] text-[var(--muted)] font-sans">
-                      {k.duration_days > 0 ? `${k.duration_days}D` : "Lifetime"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={handleCopyAll}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 px-3 text-xs rounded border border-[var(--border-soft)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] transition-colors"
+                  className="ref-btn primary flex-1"
                 >
-                  <Copy className="w-3.5 h-3.5" />
-                  Copy All
+                  {copiedKey === "ALL" ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied All ({generatedKeys.length}) Keys!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy All ({generatedKeys.length}) Keys</span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={handleDownloadTxt}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 px-3 text-xs rounded border border-[var(--border-soft)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] transition-colors"
+                  className="ref-btn flex-1"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Download .TXT
+                  <span>Download .TXT</span>
                 </button>
+                {generatedReceipt && (
+                  <button
+                    type="button"
+                    onClick={() => printReceiptWindow(generatedReceipt)}
+                    className="ref-btn"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Receipt</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)] max-h-[420px] overflow-y-auto font-mono text-xs divide-y divide-[var(--line)]">
+                {generatedKeys.map((k) => (
+                  <div
+                    key={k.id}
+                    className="flex items-center justify-between py-2 px-1 hover:bg-[var(--surface-hover)] rounded"
+                  >
+                    <span className="text-[var(--ink)] font-bold">{k.key_str}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-[var(--muted)]">
+                        {k.duration_days > 0 ? `${k.duration_days}D` : "Lifetime"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopySingle(k.key_str)}
+                        className="ref-btn !min-h-[22px] !px-2 text-[10px]"
+                      >
+                        {copiedKey === k.key_str ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
-            <div className="py-20 text-center text-xs text-[var(--muted)]">
-              Configure parameters on the left to mint a synchronized batch of keys.
+            <div className="py-24 text-center text-xs text-[var(--muted)] font-mono">
+              Configure parameters on the left and click "Mint Keys" to generate a batch.
             </div>
           )}
         </div>

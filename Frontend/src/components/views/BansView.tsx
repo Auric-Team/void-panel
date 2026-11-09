@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { api, BanRecord } from "../../lib/api";
+import { api, BanRecord, copyToClipboard } from "../../lib/api";
 import { useToast } from "../Toast";
 import { Modal } from "../Modal";
-import { ShieldAlert, ShieldCheck, Plus, Trash2, Smartphone, Globe, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Smartphone, Globe, Copy, Check } from "lucide-react";
 
 export const BansView: React.FC = () => {
   const { toast } = useToast();
   const [bans, setBans] = useState<BanRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Add Ban Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [banType, setBanType] = useState<"hwid" | "ip">("hwid");
   const [banValue, setBanValue] = useState("");
@@ -31,6 +31,15 @@ export const BansView: React.FC = () => {
   useEffect(() => {
     loadBans();
   }, []);
+
+  const handleCopy = async (text: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(text);
+      setTimeout(() => setCopiedId(null), 1500);
+      toast(`Copied ${text} to clipboard`, "success");
+    }
+  };
 
   const handleAddBan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,49 +72,50 @@ export const BansView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-gradient)] shadow-sm">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-display tracking-tight font-medium">
-              Security Blacklist & Hardware Bans
-            </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/30">
-              {bans.length} Active Bans
-            </span>
+    <div className="space-y-5">
+      <div className="ref-panel p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="ref-section-head">
+          <span className="ref-section-number">02</span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-display text-2xl font-normal text-[var(--ink)]">
+                Security Blacklist &amp; Hardware Bans
+              </h2>
+              <span className="ref-badge danger font-mono text-[10px]">
+                {bans.length} Active Bans
+              </span>
+            </div>
+            <p className="text-xs text-[var(--muted)] mt-0.5">
+              Banned device HWIDs or network IPs are immediately rejected at the socket authentication gate.
+            </p>
           </div>
-          <p className="text-xs text-[var(--muted)] mt-0.5">
-            Banned device HWIDs or network IPs are immediately rejected by the socket authentication gate.
-          </p>
         </div>
         <button
           onClick={() => setModalOpen(true)}
-          className="flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-md bg-rose-600 text-white hover:bg-rose-700 shadow-sm transition-all"
+          className="ref-btn solid-danger font-semibold"
         >
           <Plus className="w-4 h-4" />
           <span>Add Blacklist Ban</span>
         </button>
       </div>
 
-      {/* Bans Table */}
-      <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--surface-solid)] overflow-hidden shadow-sm">
+      <div className="ref-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[var(--surface)] text-[var(--muted)] border-b border-[var(--border-soft)]">
+            <thead className="bg-[var(--surface)] text-[var(--muted)] border-b border-[var(--line)] font-mono text-[10.5px] uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3 font-medium">TYPE</th>
-                <th className="px-4 py-3 font-medium">IDENTIFIER (HWID / IP)</th>
-                <th className="px-4 py-3 font-medium">BAN REASON</th>
-                <th className="px-4 py-3 font-medium">BANNED BY</th>
-                <th className="px-4 py-3 font-medium">DATE</th>
-                <th className="px-4 py-3 font-medium text-right">ACTION</th>
+                <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Identifier (HWID / IP)</th>
+                <th className="px-4 py-3 font-medium">Ban Reason</th>
+                <th className="px-4 py-3 font-medium">Banned By</th>
+                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--line)]">
               {bans.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--muted)]">
+                  <td colSpan={6} className="px-4 py-10 text-center text-[var(--muted)] font-mono">
                     No active hardware or IP bans. System is clear.
                   </td>
                 </tr>
@@ -114,10 +124,8 @@ export const BansView: React.FC = () => {
                   <tr key={b.id} className="hover:bg-[var(--surface-hover)] transition-colors">
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
-                          b.type === "hwid"
-                            ? "bg-purple-500/10 text-purple-400 border-purple-500/30"
-                            : "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                        className={`ref-badge !h-[22px] text-[10px] font-mono uppercase ${
+                          b.type === "hwid" ? "warning" : "info"
                         }`}
                       >
                         {b.type === "hwid" ? <Smartphone className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
@@ -125,14 +133,19 @@ export const BansView: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono font-semibold text-[var(--ink)]">
-                      {b.value}
+                      <div className="flex items-center gap-2">
+                        <span>{b.value}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(b.value)}
+                          className="ref-btn !min-h-[22px] !px-1.5 text-[10px]"
+                        >
+                          {copiedId === b.value ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {b.reason}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[var(--muted)]">
-                      @{b.banned_by}
-                    </td>
+                    <td className="px-4 py-3 text-[var(--muted)]">{b.reason}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--muted)]">@{b.banned_by}</td>
                     <td className="px-4 py-3 font-mono text-[var(--muted)] text-[11px]">
                       {new Date(b.created_at).toLocaleDateString()}
                     </td>
@@ -140,9 +153,9 @@ export const BansView: React.FC = () => {
                       <button
                         onClick={() => handleRemoveBan(b)}
                         title="Remove ban"
-                        className="px-2.5 py-1 text-[11px] rounded border border-[var(--border-soft)] hover:bg-rose-500/10 hover:text-rose-500 text-[var(--muted)] transition-colors"
+                        className="ref-btn danger !min-h-[26px] !px-2.5 text-[11px]"
                       >
-                        Unban
+                        <Trash2 className="w-3 h-3" /> Unban
                       </button>
                     </td>
                   </tr>
@@ -153,78 +166,72 @@ export const BansView: React.FC = () => {
         </div>
       </div>
 
-      {/* Add Ban Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Add Hardware ID or IP Blacklist Entry">
-        <form onSubmit={handleAddBan} className="space-y-4">
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Add Hardware ID or IP Blacklist Entry"
+        subtitle="Immediately block a client HWID or IP from authenticating"
+      >
+        <form onSubmit={handleAddBan} className="space-y-4 text-xs">
           <div>
-            <label className="block text-xs font-medium mb-1">Target Type</label>
+            <label className="block text-[var(--muted)] font-mono uppercase text-[10px] mb-1">
+              Target Type
+            </label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setBanType("hwid")}
-                className={`py-2 text-center rounded text-xs border font-mono transition-all ${
-                  banType === "hwid"
-                    ? "bg-[var(--accent)] text-[var(--accent-ink)] font-semibold border-transparent"
-                    : "border-[var(--border-soft)] bg-[var(--surface)] text-[var(--ink)]"
-                }`}
+                className={`ref-btn font-mono ${banType === "hwid" ? "primary font-semibold" : ""}`}
               >
-                📱 Device HWID
+                <Smartphone className="w-3.5 h-3.5" /> Device HWID
               </button>
               <button
                 type="button"
                 onClick={() => setBanType("ip")}
-                className={`py-2 text-center rounded text-xs border font-mono transition-all ${
-                  banType === "ip"
-                    ? "bg-[var(--accent)] text-[var(--accent-ink)] font-semibold border-transparent"
-                    : "border-[var(--border-soft)] bg-[var(--surface)] text-[var(--ink)]"
-                }`}
+                className={`ref-btn font-mono ${banType === "ip" ? "primary font-semibold" : ""}`}
               >
-                🌐 Network IP
+                <Globe className="w-3.5 h-3.5" /> Network IP
               </button>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium mb-1 font-mono uppercase text-[10px]">
+            <label className="block text-[var(--muted)] font-mono uppercase text-[10px] mb-1">
               {banType === "hwid" ? "Hardware Identifier (HWID)" : "IP Address"}
             </label>
-            <input
-              type="text"
-              required
-              value={banValue}
-              onChange={(e) => setBanValue(e.target.value.trim())}
-              placeholder={banType === "hwid" ? "HWID-XXXXXXXXXXXXXXXX" : "192.168.1.1"}
-              className="w-full px-3 py-2 text-xs rounded border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] font-mono focus:outline-none focus:border-[var(--accent)]"
-            />
+            <div className="ref-input-wrap">
+              <input
+                type="text"
+                required
+                value={banValue}
+                onChange={(e) => setBanValue(e.target.value.trim())}
+                placeholder={banType === "hwid" ? "HWID-XXXXXXXXXXXXXXXX" : "192.168.1.1"}
+                className="w-full bg-transparent border-0 outline-none text-[var(--ink)] font-mono"
+              />
+            </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium mb-1 font-mono uppercase text-[10px]">
+            <label className="block text-[var(--muted)] font-mono uppercase text-[10px] mb-1">
               Ban Reason
             </label>
-            <input
-              type="text"
-              required
-              value={banReason}
-              onChange={(e) => setBanReason(e.target.value)}
-              placeholder="e.g. Memory dumping / Anti-tamper violation"
-              className="w-full px-3 py-2 text-xs rounded border border-[var(--border)] bg-[var(--surface-solid)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
-            />
+            <div className="ref-input-wrap">
+              <input
+                type="text"
+                required
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                placeholder="e.g. Memory dumping / Anti-tamper violation"
+                className="w-full bg-transparent border-0 outline-none text-[var(--ink)]"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setModalOpen(false)}
-              className="px-3 py-1.5 text-xs rounded border border-[var(--border-soft)] hover:bg-[var(--surface)]"
-            >
+            <button type="button" onClick={() => setModalOpen(false)} className="ref-btn">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-1.5 text-xs rounded bg-rose-600 text-white hover:bg-rose-700"
-            >
+            <button type="submit" disabled={submitting} className="ref-btn solid-danger font-semibold">
               {submitting ? "Blacklisting..." : "Enforce Blacklist"}
             </button>
           </div>

@@ -1,31 +1,29 @@
 import React, { useState } from "react";
-import { KeyRecord, api } from "../../lib/api";
+import { KeyRecord, api, copyToClipboard, printReceiptWindow } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../Toast";
 import { Modal } from "../Modal";
 import {
-  Key,
   Copy,
+  Check,
   RefreshCcw,
   Clock,
   Trash2,
   PauseCircle,
   PlayCircle,
   Search,
-  Filter,
   CheckSquare,
-  Square,
   ShieldCheck,
   Unlock,
-  Smartphone,
   Eye,
-  Calendar,
-  AlertTriangle,
   FileSpreadsheet,
   Plus,
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
+  Receipt,
+  Printer,
 } from "lucide-react";
 
 interface KeyManagerViewProps {
@@ -34,14 +32,15 @@ interface KeyManagerViewProps {
   onRefresh: () => void;
   onOpenCreateKey?: () => void;
   onOpenBatch?: () => void;
+  onInspectUser?: (userId: number) => void;
 }
 
 export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
   keys,
-  loading,
   onRefresh,
   onOpenCreateKey,
   onOpenBatch,
+  onInspectUser,
 }) => {
   const { role } = useAuth();
   const { toast } = useToast();
@@ -51,10 +50,16 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
   const [bindingFilter, setBindingFilter] = useState<"all" | "bound" | "unbound">("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Selection state for bulk operations
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+
+  // Delete All Keys Modal state
+  const [deleteAllModalOpen, setDeleteAllModalOpen] = useState(false);
+  const [deleteAllFilter, setDeleteAllFilter] = useState<"all" | "expired" | "unbound" | "paused">("all");
+  const [deletingAll, setDeletingAll] = useState(false);
 
   // Modal target states
   const [resetTargetKey, setResetTargetKey] = useState<KeyRecord | null>(null);
@@ -94,9 +99,26 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
   const endIndex = Math.min(startIndex + pageSize, filteredKeys.length);
   const paginatedKeys = filteredKeys.slice(startIndex, endIndex);
 
-  const handleCopy = (text: string, label = "Key") => {
-    navigator.clipboard.writeText(text);
-    toast(`${label} copied to clipboard!`, "success");
+  const handleCopy = async (text: string, label = "License Key") => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(text);
+      setTimeout(() => setCopiedId(null), 1600);
+      toast(`${label} copied!`, "success", text);
+    } else {
+      toast(`Could not copy ${label}`, "error");
+    }
+  };
+
+  const handleCopyAllFiltered = async () => {
+    if (filteredKeys.length === 0) return;
+    const allStr = filteredKeys.map((k) => k.key_str).join("\n");
+    const ok = await copyToClipboard(allStr);
+    if (ok) {
+      toast(`Copied ${filteredKeys.length} license keys to clipboard!`, "success");
+    } else {
+      toast("Failed to copy keys", "error");
+    }
   };
 
   const handleResetHwid = async () => {
@@ -153,6 +175,23 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
     }
   };
 
+  const handleConfirmDeleteAllKeys = async () => {
+    setDeletingAll(true);
+    try {
+      const res = await api.deleteAllKeys(deleteAllFilter);
+      if (res.success) {
+        toast(res.message || `Deleted ${res.affected} keys`, "warning");
+        setSelectedIds(new Set());
+        setDeleteAllModalOpen(false);
+        onRefresh();
+      }
+    } catch (err: any) {
+      toast("Failed to delete keys", "error", err.message);
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   // Bulk Operations Handlers
   const toggleSelect = (id: number) => {
     const next = new Set(selectedIds);
@@ -171,7 +210,7 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
 
   const handleBulkAction = async (action: "pause" | "activate" | "extend" | "reset_hwid" | "delete", days = 30) => {
     if (selectedIds.size === 0) return;
-    if (action === "delete" && !confirm(`Permanently delete ${selectedIds.size} keys?`)) return;
+    if (action === "delete" && !confirm(`Permanently delete ${selectedIds.size} selected keys?`)) return;
 
     setBulkLoading(true);
     try {
@@ -188,171 +227,211 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
     }
   };
 
+  const boundTotal = keys.filter((k) => k.hwid && k.hwid.trim() !== "").length;
+  const activeTotal = keys.filter((k) => k.status === "active").length;
+  const expiredTotal = keys.filter((k) => k.status === "expired").length;
+
   return (
-    <div className="space-y-6">
-      {/* Top Bar: Search, Filters, and Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg border border-[var(--border-soft)] bg-[var(--panel-gradient)]">
-        {/* Search */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--muted)]" />
+    <div className="space-y-5">
+      {/* Section Header + Summary Pills + Master Action Buttons */}
+      <div className="ref-panel p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="ref-section-head">
+          <span className="ref-section-number">01</span>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-display text-2xl font-normal text-[var(--ink)]">
+                License Key Registry
+              </h2>
+              <span className="ref-badge font-mono text-[10px]">{keys.length} Total</span>
+              <span className="ref-badge success font-mono text-[10px]">{activeTotal} Active</span>
+              <span className="ref-badge info font-mono text-[10px]">{boundTotal} Bound</span>
+              {expiredTotal > 0 && (
+                <span className="ref-badge danger font-mono text-[10px]">{expiredTotal} Expired</span>
+              )}
+            </div>
+            <p className="text-xs text-[var(--muted)] mt-0.5">
+              Click any key to copy or inspect telemetry. Click any creator handle to view their account generation report.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {onOpenCreateKey && (
+            <button onClick={onOpenCreateKey} className="ref-btn primary font-semibold">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create Key</span>
+            </button>
+          )}
+          {onOpenBatch && (
+            <button onClick={onOpenBatch} className="ref-btn">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>Batch Mint</span>
+            </button>
+          )}
+          <button
+            onClick={handleCopyAllFiltered}
+            disabled={filteredKeys.length === 0}
+            className="ref-btn"
+            title="Copy all filtered keys to clipboard"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copy All ({filteredKeys.length})</span>
+          </button>
+          <a
+            href={api.getExportUrl("csv")}
+            target="_blank"
+            rel="noreferrer"
+            className="ref-btn"
+            title="Export keys to CSV"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+            <span>CSV</span>
+          </a>
+          <button
+            onClick={() => {
+              setDeleteAllFilter("all");
+              setDeleteAllModalOpen(true);
+            }}
+            disabled={keys.length === 0}
+            className="ref-btn danger font-medium"
+            title="Delete all keys or filtered subset at once"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete All Keys</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Filter & Search Bar */}
+      <div className="ref-panel p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="ref-input-wrap flex-1 max-w-md !min-h-[36px]">
+          <Search className="w-4 h-4 text-[var(--muted)] shrink-0" />
           <input
             type="text"
-            placeholder="Search by key, hardware ID, creator, or note..."
+            placeholder="Search key string, Android HWID, creator, or customer note..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-xs rounded-md bg-[var(--surface)] border border-[var(--border)] text-[var(--ink)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--accent)] font-mono"
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="w-full bg-transparent border-0 outline-none text-xs font-mono text-[var(--ink)] placeholder:text-[var(--muted)]"
           />
         </div>
 
-        {/* Binding Status Filters */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <div className="flex items-center rounded-md border border-[var(--border-soft)] bg-[var(--surface-solid)] p-0.5 text-xs font-mono">
-            <button
-              onClick={() => setBindingFilter("all")}
-              className={`px-2.5 py-1 rounded text-[11px] transition-colors ${
-                bindingFilter === "all"
-                  ? "bg-[var(--accent)] text-[var(--accent-ink)] font-semibold shadow-xs"
-                  : "text-[var(--muted)] hover:text-[var(--ink)]"
-              }`}
-            >
-              All Bindings
-            </button>
-            <button
-              onClick={() => setBindingFilter("bound")}
-              className={`px-2.5 py-1 rounded text-[11px] transition-colors flex items-center gap-1 ${
-                bindingFilter === "bound"
-                  ? "bg-emerald-500 text-white font-semibold shadow-xs"
-                  : "text-[var(--muted)] hover:text-emerald-400"
-              }`}
-            >
-              <ShieldCheck className="w-3 h-3" />
-              <span>Bound (Locked)</span>
-            </button>
-            <button
-              onClick={() => setBindingFilter("unbound")}
-              className={`px-2.5 py-1 rounded text-[11px] transition-colors flex items-center gap-1 ${
-                bindingFilter === "unbound"
-                  ? "bg-zinc-600 text-white font-semibold shadow-xs"
-                  : "text-[var(--muted)] hover:text-[var(--ink)]"
-              }`}
-            >
-              <Unlock className="w-3 h-3" />
-              <span>Unbound (Fresh)</span>
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Binding Filter */}
+          <div className="ref-tab-list">
+            {(["all", "bound", "unbound"] as const).map((b) => (
+              <button
+                key={b}
+                type="button"
+                aria-selected={bindingFilter === b}
+                onClick={() => {
+                  setBindingFilter(b);
+                  setCurrentPage(1);
+                }}
+                className="ref-tab-btn capitalize !text-[11px] !px-2.5"
+              >
+                {b === "all" ? "All Bindings" : b === "bound" ? "Locked (Bound)" : "Fresh (Unbound)"}
+              </button>
+            ))}
           </div>
 
-          {/* Status Filters */}
-          <div className="flex items-center rounded-md border border-[var(--border-soft)] bg-[var(--surface-solid)] p-0.5 text-xs font-mono ml-1">
+          {/* Status Filter */}
+          <div className="ref-tab-list">
             {["all", "active", "paused", "expired"].map((s) => (
               <button
                 key={s}
-                onClick={() => setStatusFilter(s)}
-                className={`px-2.5 py-1 rounded text-[11px] uppercase transition-colors ${
-                  statusFilter === s
-                    ? "bg-[var(--surface-hover)] text-[var(--ink)] font-semibold border border-[var(--border)]"
-                    : "text-[var(--muted)] hover:text-[var(--ink)]"
-                }`}
+                type="button"
+                aria-selected={statusFilter === s}
+                onClick={() => {
+                  setStatusFilter(s);
+                  setCurrentPage(1);
+                }}
+                className="ref-tab-btn uppercase !text-[10.5px] !px-2.5 font-mono"
               >
                 {s}
               </button>
             ))}
           </div>
-
-          {/* Export CSV */}
-          <a
-            href={api.getExportUrl("csv")}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-md border border-[var(--border-soft)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--ink)] font-mono transition-colors shrink-0"
-            title="Export keys to CSV"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Export</span>
-          </a>
-
-          {/* Quick Generate Key & Batch buttons */}
-          {onOpenCreateKey && (
-            <button
-              onClick={onOpenCreateKey}
-              className="primary-btn flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md shrink-0 shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Generate Key</span>
-            </button>
-          )}
-          {onOpenBatch && (
-            <button
-              onClick={onOpenBatch}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--ink)] hover:bg-[var(--surface-hover)] transition-colors shrink-0 font-medium"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Batch</span>
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Bulk Operations Toolbar */}
+      {/* Bulk Selection Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-xs font-mono animate-fadeIn">
+        <div className="ref-panel p-3.5 border-[var(--accent)] flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
           <div className="flex items-center gap-2 text-[var(--ink)]">
             <CheckSquare className="w-4 h-4 text-[var(--accent)]" />
             <span>
-              <strong>{selectedIds.size}</strong> key(s) selected
+              <strong>{selectedIds.size}</strong> license key(s) selected
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={async () => {
+                const selectedKeys = keys
+                  .filter((k) => selectedIds.has(k.id))
+                  .map((k) => k.key_str)
+                  .join("\n");
+                await handleCopy(selectedKeys, `${selectedIds.size} Selected Keys`);
+              }}
+              className="ref-btn !min-h-[30px] !px-2.5 text-[11px]"
+            >
+              <Copy className="w-3 h-3" /> Copy Selected
+            </button>
             <button
               onClick={() => handleBulkAction("pause")}
               disabled={bulkLoading}
-              className="px-2.5 py-1 rounded border border-[var(--border-soft)] hover:bg-[var(--surface)] text-amber-500 font-medium cursor-pointer"
+              className="ref-btn !min-h-[30px] !px-2.5 text-[11px] text-amber-500"
             >
               Bulk Pause
             </button>
             <button
               onClick={() => handleBulkAction("activate")}
               disabled={bulkLoading}
-              className="px-2.5 py-1 rounded border border-[var(--border-soft)] hover:bg-[var(--surface)] text-emerald-500 font-medium cursor-pointer"
+              className="ref-btn !min-h-[30px] !px-2.5 text-[11px] text-emerald-500"
             >
               Bulk Activate
             </button>
-            <button
-              onClick={() => handleBulkAction("extend", 30)}
-              disabled={bulkLoading}
-              className="px-2.5 py-1 rounded border border-[var(--border-soft)] hover:bg-[var(--surface)] text-sky-400 font-medium cursor-pointer"
-            >
-              Bulk +30 Days
-            </button>
+            {role !== "reseller" && (
+              <button
+                onClick={() => handleBulkAction("extend", 30)}
+                disabled={bulkLoading}
+                className="ref-btn !min-h-[30px] !px-2.5 text-[11px] text-sky-400"
+              >
+                Bulk +30 Days
+              </button>
+            )}
             <button
               onClick={() => handleBulkAction("reset_hwid")}
               disabled={bulkLoading}
-              className="px-2.5 py-1 rounded border border-[var(--border-soft)] hover:bg-[var(--surface)] text-[var(--ink)] font-medium cursor-pointer"
+              className="ref-btn !min-h-[30px] !px-2.5 text-[11px]"
             >
               Bulk Reset HWID
             </button>
             <button
               onClick={() => handleBulkAction("delete")}
               disabled={bulkLoading}
-              className="px-2.5 py-1 rounded border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 font-medium cursor-pointer"
+              className="ref-btn danger !min-h-[30px] !px-2.5 text-[11px]"
             >
-              Bulk Delete
+              <Trash2 className="w-3 h-3" /> Delete Selected ({selectedIds.size})
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
               className="px-2 py-1 text-[var(--muted)] hover:text-[var(--ink)] cursor-pointer"
             >
-              Cancel
+              Clear
             </button>
           </div>
         </div>
       )}
 
-      {/* Main Keys Table */}
-      <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--panel-gradient)] overflow-hidden shadow-sm">
+      {/* Keys Table */}
+      <div className="ref-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-[var(--border-soft)] bg-[var(--surface)] text-[var(--muted)] font-mono text-[11px] uppercase tracking-wider">
+              <tr className="border-b border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] font-mono text-[10.5px] uppercase tracking-wider">
                 <th className="py-3 px-3 w-8">
                   <input
                     type="checkbox"
@@ -361,30 +440,30 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
                     className="rounded accent-[var(--accent)] cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-4">License Key</th>
+                <th className="py-3 px-4">License Key (Click to Copy)</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Device Binding (HWID)</th>
-                <th className="py-3 px-4">Duration / Expiration</th>
-                <th className="py-3 px-4">Created By / On</th>
+                <th className="py-3 px-4">Duration / Cost</th>
+                <th className="py-3 px-4">Creator Account</th>
                 <th className="py-3 px-4">Customer Note</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 text-right">Controls</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border-soft)] font-ui">
+            <tbody className="divide-y divide-[var(--line)] font-ui">
               {paginatedKeys.length > 0 ? (
                 paginatedKeys.map((k) => {
                   const isBound = Boolean(k.hwid && k.hwid.trim() !== "");
                   const isSelected = selectedIds.has(k.id);
+                  const isKeyCopied = copiedId === k.key_str;
 
                   return (
                     <tr
                       key={k.id}
                       className={`transition-colors ${
-                        isSelected ? "bg-[var(--accent)]/5" : "hover:bg-[var(--surface-hover)]"
+                        isSelected ? "bg-[var(--selection)]" : "hover:bg-[var(--surface-hover)]"
                       }`}
                     >
-                      {/* Checkbox */}
-                      <td className="py-3.5 px-3">
+                      <td className="py-3 px-3">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -393,167 +472,197 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
                         />
                       </td>
 
-                      {/* License Key */}
-                      <td className="py-3.5 px-4 font-mono font-medium text-[var(--ink)]">
+                      {/* License Key with prominent 1-click Copy button */}
+                      <td className="py-3 px-4 font-mono">
                         <div className="flex items-center gap-2">
-                          <span
-                            onClick={() => setInspectKey(k)}
-                            className="cursor-pointer hover:underline text-[var(--accent)] font-semibold"
-                            title="Click to view full license & device binding telemetry"
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(k.key_str, "License Key")}
+                            className="font-mono font-bold text-[var(--ink)] hover:text-[var(--accent)] text-left cursor-pointer"
+                            title="Click to copy license key"
                           >
                             {k.key_str}
-                          </span>
+                          </button>
                           <button
+                            type="button"
                             onClick={() => handleCopy(k.key_str, "License Key")}
-                            title="Copy key string"
-                            className="p-1 rounded text-[var(--muted)] hover:text-[var(--ink)] cursor-pointer"
+                            title="Copy license key to clipboard"
+                            className={`ref-btn !min-h-[24px] !px-2 !py-0 text-[10px] font-mono ${
+                              isKeyCopied ? "success-badge" : ""
+                            }`}
                           >
-                            <Copy className="w-3 h-3" />
+                            {isKeyCopied ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-500" />
+                                <span>Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copy</span>
+                              </>
+                            )}
                           </button>
                         </div>
                       </td>
 
                       {/* Status */}
-                      <td className="py-3.5 px-4">
+                      <td className="py-3 px-4">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] uppercase font-mono font-semibold ${
+                          className={`ref-badge !h-[22px] text-[10px] uppercase font-mono font-semibold ${
                             k.status === "active"
-                              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                              ? "success"
                               : k.status === "paused"
-                              ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
-                              : "bg-rose-500/15 text-rose-400 border border-rose-500/30"
+                              ? "warning"
+                              : "danger"
                           }`}
                         >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              k.status === "active"
-                                ? "bg-emerald-400"
-                                : k.status === "paused"
-                                ? "bg-amber-400"
-                                : "bg-rose-400"
-                            }`}
-                          />
+                          <i className="w-1.5 h-1.5 rounded-full bg-current" />
                           {k.status}
                         </span>
                       </td>
 
-                      {/* Device Binding (HWID) Column - STRICT 1 DEVICE INDICATOR */}
-                      <td className="py-3.5 px-4 font-mono text-[11px]">
+                      {/* Device Binding */}
+                      <td className="py-3 px-4 font-mono text-[11px]">
                         {isBound ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 w-fit">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                              BOUND TO 1 DEVICE
-                            </span>
-                            <div className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--ink)]">
-                              <Smartphone className="w-3 h-3 text-[var(--muted)] shrink-0" />
-                              <span className="truncate max-w-[130px] font-medium" title={k.hwid!}>
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                              <span className="truncate max-w-[130px] font-semibold text-[var(--ink)]" title={k.hwid!}>
                                 {k.hwid}
                               </span>
                               <button
+                                type="button"
                                 onClick={() => handleCopy(k.hwid!, "Device HWID")}
-                                title="Copy HWID"
                                 className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--ink)] cursor-pointer"
+                                title="Copy HWID"
                               >
-                                <Copy className="w-3 h-3" />
+                                {copiedId === k.hwid ? (
+                                  <Check className="w-3 h-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
                               </button>
                             </div>
-                            <span className="text-[10px] text-[var(--muted)]">
-                              Bound: {k.bound_at ? new Date(k.bound_at).toLocaleString() : "First Login"} · ({k.reset_count}/{k.max_resets} resets)
+                            <span className="block text-[10px] text-[var(--muted)]">
+                              Resets: {k.reset_count}/{k.max_resets}
                             </span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-medium bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 w-fit">
-                              <Unlock className="w-3.5 h-3.5 text-zinc-400" />
-                              NOT BOUNDED
-                            </span>
-                            <span className="text-[10px] text-[var(--muted)] italic">
-                              Ready for 1st device activation
-                            </span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Duration / Expiration */}
-                      <td className="py-3.5 px-4 text-[11px]">
-                        {k.duration_days === 0 ? (
-                          <span className="text-emerald-400 font-semibold font-mono">
-                            LIFETIME ACCESS
-                          </span>
-                        ) : k.expires_at ? (
-                          <div>
-                            <span className="font-mono text-[var(--ink)] font-medium">
-                              {new Date(k.expires_at).toLocaleDateString()}
-                            </span>
-                            <small className="block text-[10px] text-[var(--muted)] font-mono">
-                              {new Date(k.expires_at).toLocaleTimeString()}
-                            </small>
-                          </div>
-                        ) : (
-                          <span className="text-[var(--muted)] font-mono">
-                            {k.duration_days} Days (Starts on 1st login)
+                          <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--muted)]">
+                            <Unlock className="w-3 h-3" />
+                            Unbound (1st login locks)
                           </span>
                         )}
                       </td>
 
-                      {/* Created By / On */}
-                      <td className="py-3.5 px-4 text-[11px] font-mono text-[var(--muted)]">
+                      {/* Duration & Credit Cost */}
+                      <td className="py-3 px-4 font-mono text-[11px]">
                         <div>
-                          <span className="text-[var(--ink)]">@{k.created_by_name || "system"}</span>
-                          <small className="block text-[10px] text-[var(--muted)]">
-                            {new Date(k.created_at).toLocaleDateString()}
-                          </small>
+                          <span className="font-semibold text-[var(--ink)]">
+                            {k.duration_days === 0 ? "Lifetime (∞)" : `${k.duration_days} Days`}
+                          </span>
+                          <span className="ml-1.5 text-[10px] text-amber-500">({k.credit_cost} CR)</span>
+                        </div>
+                        <small className="block text-[10px] text-[var(--muted)]">
+                          {k.expires_at
+                            ? `Exp: ${new Date(k.expires_at).toLocaleDateString()}`
+                            : k.duration_days === 0
+                            ? "Never expires"
+                            : "Starts on activation"}
+                        </small>
+                      </td>
+
+                      {/* Creator Account (Clickable to inspect user's generated keys) */}
+                      <td className="py-3 px-4 font-mono text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => k.created_by_id && onInspectUser?.(k.created_by_id)}
+                          className={`text-left ${
+                            k.created_by_id
+                              ? "text-[var(--ink)] hover:text-[var(--accent)] underline decoration-dotted underline-offset-2 cursor-pointer"
+                              : "text-[var(--muted)]"
+                          }`}
+                          title={
+                            k.created_by_id
+                              ? `Click to inspect @${k.created_by_name}'s total keys generated`
+                              : undefined
+                          }
+                        >
+                          @{k.created_by_name || "system"}
+                        </button>
+                        <small className="block text-[10px] text-[var(--muted)]">
+                          {new Date(k.created_at).toLocaleDateString()}
+                        </small>
+                      </td>
+
+                      {/* Note & Payment Receipt Indicator */}
+                      <td className="py-3 px-4 text-[11px] text-[var(--muted)] max-w-[180px]">
+                        <div className="space-y-1">
+                          {(k.payment_amount && k.payment_amount > 0) || k.proof_image || k.payment_method ? (
+                            <button
+                              type="button"
+                              onClick={() => setInspectKey(k)}
+                              className="ref-badge success !h-[20px] !px-2 !text-[10px] cursor-pointer"
+                              title="Click to inspect Payment Receipt & Proof Screenshot"
+                            >
+                              <Receipt className="w-3 h-3" />
+                              <span>
+                                {k.payment_amount && k.payment_amount > 0
+                                  ? `${k.payment_amount} ${k.payment_currency || "USD"}`
+                                  : "Receipt"}
+                                {k.proof_image ? " + Proof" : ""}
+                              </span>
+                            </button>
+                          ) : null}
+                          <div className="truncate text-[var(--ink)]">
+                            {k.customer_name || k.note || "—"}
+                          </div>
                         </div>
                       </td>
 
-                      {/* Customer Note */}
-                      <td className="py-3.5 px-4 text-[11px] text-[var(--muted)] max-w-[140px] truncate">
-                        {k.note || "—"}
-                      </td>
-
                       {/* Actions */}
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="inline-flex items-center gap-1.5">
-                          {/* Inspect / View Full Details */}
+                      <td className="py-3 px-4 text-right">
+                        <div className="inline-flex items-center gap-1">
                           <button
+                            type="button"
                             onClick={() => setInspectKey(k)}
-                            title="Inspect License & Device Binding Details"
-                            className="p-1.5 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-[var(--accent)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
+                            title="Inspect license & device binding"
+                            className="ref-btn !min-h-[28px] !px-2"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* Reset HWID Button */}
                           {isBound && (
                             <button
+                              type="button"
                               onClick={() => setResetTargetKey(k)}
                               title="Reset HWID / Unbind Device"
-                              className="p-1.5 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-amber-500 hover:bg-amber-500/10 transition-colors cursor-pointer"
+                              className="ref-btn !min-h-[28px] !px-2 text-amber-500"
                             >
                               <RefreshCcw className="w-3.5 h-3.5" />
                             </button>
                           )}
 
-                          {/* Extend Duration */}
-                          {k.duration_days > 0 && (
+                          {k.duration_days > 0 && role !== "reseller" && (
                             <button
+                              type="button"
                               onClick={() => {
                                 setExtendTargetKey(k);
                                 setExtendDays(30);
                               }}
-                              title="Extend subscription duration"
-                              className="p-1.5 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-sky-400 hover:bg-sky-500/10 transition-colors cursor-pointer"
+                              title="Extend duration"
+                              className="ref-btn !min-h-[28px] !px-2 text-sky-400"
                             >
                               <Clock className="w-3.5 h-3.5" />
                             </button>
                           )}
 
-                          {/* Pause / Resume Toggle */}
                           <button
+                            type="button"
                             onClick={() => handleToggleStatus(k)}
                             title={k.status === "active" ? "Pause key" : "Resume key"}
-                            className="p-1.5 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+                            className="ref-btn !min-h-[28px] !px-2"
                           >
                             {k.status === "active" ? (
                               <PauseCircle className="w-3.5 h-3.5 text-amber-500" />
@@ -562,11 +671,11 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
                             )}
                           </button>
 
-                          {/* Delete Key */}
                           <button
+                            type="button"
                             onClick={() => handleDelete(k)}
                             title="Delete key permanently"
-                            className="p-1.5 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            className="ref-btn danger !min-h-[28px] !px-2"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -578,7 +687,7 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
               ) : (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-xs text-[var(--muted)] font-mono">
-                    No keys found matching filter criteria.
+                    No license keys found matching current filters.
                   </td>
                 </tr>
               )}
@@ -586,19 +695,18 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
           </table>
         </div>
 
-        {/* Pagination Bar */}
+        {/* Pagination Footer */}
         {filteredKeys.length > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-[var(--border-soft)] bg-[var(--surface-solid)] text-xs font-mono">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-[var(--line)] bg-[var(--surface-solid)] text-xs font-mono">
             <div className="text-[var(--muted)] text-[11px]">
-              Showing <span className="font-semibold text-[var(--ink)]">{startIndex + 1}</span> to{" "}
-              <span className="font-semibold text-[var(--ink)]">{endIndex}</span> of{" "}
-              <span className="font-semibold text-[var(--ink)]">{filteredKeys.length}</span> keys
+              Showing <strong className="text-[var(--ink)]">{startIndex + 1}</strong>–
+              <strong className="text-[var(--ink)]">{endIndex}</strong> of{" "}
+              <strong className="text-[var(--ink)]">{filteredKeys.length}</strong> keys
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Page Size Selector */}
               <div className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
-                <span>Per page:</span>
+                <span>Rows:</span>
                 <select
                   value={pageSize}
                   onChange={(e) => {
@@ -613,27 +721,21 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
                 </select>
               </div>
 
-              {/* Prev / Page X of Y / Next Buttons */}
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={safeCurrentPage <= 1}
-                  className="p-1.5 rounded border border-[var(--border-soft)] bg-[var(--surface)] text-[var(--ink)] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[var(--surface-hover)] transition-colors"
-                  title="Previous page"
+                  className="ref-btn !min-h-[28px] !px-2"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-
-                <span className="px-2.5 py-1 text-[11px] text-[var(--muted)]">
-                  Page <span className="font-semibold text-[var(--ink)]">{safeCurrentPage}</span> of{" "}
-                  <span className="font-semibold text-[var(--ink)]">{totalPages}</span>
+                <span className="px-2.5 text-[11px] text-[var(--muted)]">
+                  Page <strong className="text-[var(--ink)]">{safeCurrentPage}</strong> / {totalPages}
                 </span>
-
                 <button
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={safeCurrentPage >= totalPages}
-                  className="p-1.5 rounded border border-[var(--border-soft)] bg-[var(--surface)] text-[var(--ink)] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[var(--surface-hover)] transition-colors"
-                  title="Next page"
+                  className="ref-btn !min-h-[28px] !px-2"
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -643,7 +745,68 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
         )}
       </div>
 
-      {/* Modal 1: Reset HWID Confirmation */}
+      {/* Modal: Delete All Keys At Once */}
+      <Modal
+        isOpen={deleteAllModalOpen}
+        onClose={() => setDeleteAllModalOpen(false)}
+        title="Delete All License Keys"
+        subtitle="Select which category of license keys to permanently purge at once"
+        icon={<AlertTriangle className="w-5 h-5 text-[var(--danger)]" />}
+      >
+        <div className="space-y-4 text-xs font-ui">
+          <div className="grid grid-cols-1 gap-2">
+            {[
+              { id: "all", label: `Delete ALL Keys (${keys.length} total)`, desc: "Purges every active, bound, paused, and expired key in your scope" },
+              { id: "expired", label: `Delete Only Expired Keys (${expiredTotal})`, desc: "Removes expired keys while keeping active licenses intact" },
+              { id: "unbound", label: `Delete Only Unbound Keys (${keys.length - boundTotal})`, desc: "Removes unused keys that have not yet bound to any device" },
+              { id: "paused", label: "Delete Only Paused Keys", desc: "Removes keys currently marked as paused" },
+            ].map((opt) => (
+              <label
+                key={opt.id}
+                onClick={() => setDeleteAllFilter(opt.id as any)}
+                className={`p-3 rounded-lg border cursor-pointer flex items-start gap-3 transition-all ${
+                  deleteAllFilter === opt.id
+                    ? "border-[var(--danger)] bg-[var(--danger-fill)]"
+                    : "border-[var(--border-soft)] bg-[var(--surface)]"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deleteAllFilter"
+                  checked={deleteAllFilter === opt.id}
+                  onChange={() => setDeleteAllFilter(opt.id as any)}
+                  className="mt-0.5 accent-[var(--danger)]"
+                />
+                <div>
+                  <strong className="block font-mono text-xs text-[var(--ink)]">{opt.label}</strong>
+                  <span className="text-[11px] text-[var(--muted)]">{opt.desc}</span>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setDeleteAllModalOpen(false)}
+              className="ref-btn"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDeleteAllKeys}
+              disabled={deletingAll}
+              className="ref-btn solid-danger font-semibold"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{deletingAll ? "Deleting..." : "Confirm Bulk Purge"}</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Reset HWID Confirmation */}
       <Modal
         isOpen={Boolean(resetTargetKey)}
         onClose={() => setResetTargetKey(null)}
@@ -652,27 +815,23 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
         icon={<RefreshCcw className="w-5 h-5 text-amber-500" />}
       >
         <div className="space-y-4 text-xs font-ui">
-          <div className="p-3.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-[var(--ink)]">
-            <strong className="block mb-1 text-amber-500">Unbinding Hardware Notice</strong>
-            This action will clear the bound HWID (<code className="font-mono text-amber-300">{resetTargetKey?.hwid}</code>).
-            The user will be able to activate this license on a fresh device on next launch.
+          <div className="p-3.5 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-fill)] text-[var(--ink)]">
+            <strong className="block mb-1">Unbinding Hardware Notice</strong>
+            This clears the bound HWID (<code className="font-mono">{resetTargetKey?.hwid}</code>) so the license can bind to a replacement Android device on next login.
           </div>
 
           <div className="font-mono text-[11px] p-2.5 rounded bg-[var(--surface)] border border-[var(--border-soft)]">
             Resets Used: {resetTargetKey?.reset_count} / {resetTargetKey?.max_resets} allowable
           </div>
 
-          <div className="flex gap-3 justify-end pt-2">
-            <button
-              onClick={() => setResetTargetKey(null)}
-              className="px-4 py-2 rounded-md border border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-hover)] cursor-pointer"
-            >
+          <div className="flex gap-2 justify-end pt-2">
+            <button onClick={() => setResetTargetKey(null)} className="ref-btn">
               Cancel
             </button>
             <button
               onClick={handleResetHwid}
               disabled={resetting}
-              className="px-4 py-2 rounded-md font-medium bg-amber-500 text-black hover:bg-amber-400 transition-colors cursor-pointer disabled:opacity-50"
+              className="ref-btn primary font-semibold"
             >
               {resetting ? "Resetting..." : "Confirm HWID Reset"}
             </button>
@@ -680,7 +839,7 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
         </div>
       </Modal>
 
-      {/* Modal 2: Extend Key Duration */}
+      {/* Modal: Extend Key Duration */}
       <Modal
         isOpen={Boolean(extendTargetKey)}
         onClose={() => setExtendTargetKey(null)}
@@ -689,51 +848,42 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
         icon={<Clock className="w-5 h-5 text-sky-400" />}
       >
         <div className="space-y-4 text-xs font-ui">
-          <label className="block text-[var(--muted)]">Additional Days:</label>
           <div className="grid grid-cols-4 gap-2">
             {[7, 15, 30, 60].map((d) => (
               <button
                 key={d}
                 type="button"
                 onClick={() => setExtendDays(d)}
-                className={`py-2 text-center rounded border transition-colors cursor-pointer ${
-                  extendDays === d
-                    ? "bg-[var(--accent)] text-[var(--accent-ink)] font-semibold border-transparent"
-                    : "border-[var(--border-soft)] bg-[var(--surface)] text-[var(--ink)]"
-                }`}
+                className={`ref-btn font-mono ${extendDays === d ? "primary" : ""}`}
               >
-                +{d} Days
+                +{d}D
               </button>
             ))}
           </div>
 
-          <input
-            type="number"
-            min="1"
-            max="365"
-            value={extendDays}
-            onChange={(e) => setExtendDays(Number(e.target.value))}
-            className="w-full p-2.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--ink)] font-mono"
-          />
+          <div className="ref-input-wrap">
+            <input
+              type="number"
+              min="1"
+              max="365"
+              value={extendDays}
+              onChange={(e) => setExtendDays(Number(e.target.value))}
+              className="w-full bg-transparent border-0 outline-none text-[var(--ink)] font-mono"
+            />
+          </div>
 
-          <div className="flex gap-3 justify-end pt-2">
-            <button
-              onClick={() => setExtendTargetKey(null)}
-              className="px-4 py-2 rounded-md border border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-hover)] cursor-pointer"
-            >
+          <div className="flex gap-2 justify-end pt-2">
+            <button onClick={() => setExtendTargetKey(null)} className="ref-btn">
               Cancel
             </button>
-            <button
-              onClick={handleExtendDuration}
-              className="px-4 py-2 rounded-md font-medium bg-[var(--accent)] text-[var(--accent-ink)] hover:bg-[var(--accent-bright)] transition-colors cursor-pointer"
-            >
-              Add Days to License
+            <button onClick={handleExtendDuration} className="ref-btn primary font-semibold">
+              Add +{extendDays} Days
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal 3: COMPREHENSIVE LICENSE & DEVICE BINDING SPECIFICATION */}
+      {/* Modal: Inspect Key Details */}
       <Modal
         isOpen={Boolean(inspectKey)}
         onClose={() => setInspectKey(null)}
@@ -743,161 +893,138 @@ export const KeyManagerView: React.FC<KeyManagerViewProps> = ({
       >
         {inspectKey && (
           <div className="space-y-4 text-xs font-ui">
-            {/* Key String Card with Copy */}
-            <div className="p-3.5 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)]">
-              <span className="block text-[10px] text-[var(--muted)] font-mono uppercase mb-1">
-                License Key String
-              </span>
-              <div className="flex items-center justify-between gap-2">
-                <code className="text-sm font-mono font-bold text-[var(--accent)] tracking-wide break-all">
-                  {inspectKey.key_str}
-                </code>
-                <button
-                  onClick={() => handleCopy(inspectKey.key_str, "License Key")}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[var(--border-soft)] bg-[var(--surface-solid)] text-[var(--ink)] hover:bg-[var(--surface-hover)] shrink-0 cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Device Hardware Binding Card (Strict 1 Device Lock) */}
-            <div className="p-4 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)] space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-emerald-400" />
-                  <span className="font-semibold text-[var(--ink)]">Hardware Binding Status</span>
-                </div>
-                {inspectKey.hwid ? (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    LOCKED TO 1 DEVICE ONLY
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-medium bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 flex items-center gap-1">
-                    <Unlock className="w-3 h-3 text-zinc-400" />
-                    NOT BOUNDED (READY FOR 1ST DEVICE)
-                  </span>
-                )}
-              </div>
-
-              {inspectKey.hwid ? (
-                <div className="space-y-2 pt-2 border-t border-[var(--border-soft)]">
-                  <div>
-                    <span className="text-[10px] text-[var(--muted)] font-mono uppercase block mb-1">
-                      Bound Android HWID
-                    </span>
-                    <div className="flex items-center justify-between gap-2 p-2 rounded bg-[var(--surface-solid)] border border-[var(--border-soft)]">
-                      <code className="text-[11px] font-mono text-[var(--ink)] break-all">
-                        {inspectKey.hwid}
-                      </code>
-                      <button
-                        onClick={() => handleCopy(inspectKey.hwid!, "Device HWID")}
-                        className="p-1 rounded text-[var(--muted)] hover:text-[var(--ink)] shrink-0 cursor-pointer"
-                        title="Copy HWID"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono pt-1">
-                    <div>
-                      <span className="text-[var(--muted)] block">Bound Timestamp:</span>
-                      <span className="text-[var(--ink)]">
-                        {inspectKey.bound_at
-                          ? new Date(inspectKey.bound_at).toLocaleString()
-                          : "First Login"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[var(--muted)] block">Resets Consumed:</span>
-                      <span className="text-[var(--ink)]">
-                        {inspectKey.reset_count} / {inspectKey.max_resets} allowable
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-2.5 rounded bg-[var(--surface-solid)] border border-[var(--border-soft)] text-[11px] text-[var(--muted)] font-mono">
-                  This key has not yet authenticated from any device. The very first device that sends an authentication request with this key will permanently and automatically lock it to its hardware ID.
-                </div>
-              )}
-            </div>
-
-            {/* Validity & Subscription Telemetry */}
-            <div className="p-4 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)] space-y-2.5 font-mono text-xs">
-              <span className="text-[10px] text-[var(--muted)] font-mono uppercase block font-semibold">
-                Subscription & Validity Details
-              </span>
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Status</span>
-                  <span className="font-bold uppercase text-emerald-400">{inspectKey.status}</span>
-                </div>
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Plan Duration</span>
-                  <span className="text-[var(--ink)]">
-                    {inspectKey.duration_days === 0
-                      ? "Lifetime Unlimited"
-                      : `${inspectKey.duration_days} Days (${inspectKey.duration_days * 24} Hours)`}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Creation Date</span>
-                  <span className="text-[var(--ink)]">
-                    {new Date(inspectKey.created_at).toLocaleString()}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Expiration Date</span>
-                  <span className="text-[var(--ink)]">
-                    {inspectKey.duration_days === 0
-                      ? "Never (Lifetime)"
-                      : inspectKey.expires_at
-                      ? new Date(inspectKey.expires_at).toLocaleString()
-                      : `${inspectKey.duration_days} Days from first login`}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Created By</span>
-                  <span className="text-[var(--ink)]">@{inspectKey.created_by_name || "system"}</span>
-                </div>
-                <div>
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Credit Cost</span>
-                  <span className="text-amber-500 font-semibold">{inspectKey.credit_cost} CR</span>
-                </div>
-              </div>
-
-              {inspectKey.note && (
-                <div className="pt-2 border-t border-[var(--border-soft)]">
-                  <span className="text-[var(--muted)] text-[10px] uppercase block">Customer / Distributor Note</span>
-                  <p className="text-[var(--ink)] font-ui text-xs mt-0.5">{inspectKey.note}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex justify-between items-center pt-2">
-              <div>
-                {inspectKey.hwid && (
-                  <button
-                    onClick={() => {
-                      setResetTargetKey(inspectKey);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-amber-500/40 text-amber-500 hover:bg-amber-500/10 transition-colors font-mono cursor-pointer"
-                  >
-                    <RefreshCcw className="w-3.5 h-3.5" />
-                    <span>Unbind Hardware ID</span>
-                  </button>
-                )}
-              </div>
+            <div className="p-3.5 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)] flex items-center justify-between gap-2">
+              <code className="text-sm font-mono font-bold text-[var(--ink)] break-all">
+                {inspectKey.key_str}
+              </code>
               <button
-                onClick={() => setInspectKey(null)}
-                className="px-4 py-1.5 text-xs rounded border border-[var(--border-soft)] hover:bg-[var(--surface-hover)] text-[var(--ink)] cursor-pointer"
+                onClick={() => handleCopy(inspectKey.key_str, "License Key")}
+                className="ref-btn !min-h-[30px] font-mono shrink-0"
               >
-                Close Details
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy Key</span>
+              </button>
+            </div>
+
+            <div className="p-4 rounded-lg bg-[var(--surface)] border border-[var(--border-soft)] space-y-2.5 font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-[var(--muted)] uppercase text-[10px]">Hardware Binding</span>
+                <span className={`ref-badge !h-[20px] text-[10px] ${inspectKey.hwid ? "success" : ""}`}>
+                  {inspectKey.hwid ? "LOCKED TO 1 DEVICE" : "UNBOUND"}
+                </span>
+              </div>
+              {inspectKey.hwid && (
+                <div className="flex items-center justify-between gap-2 p-2 rounded bg-[var(--surface-solid)] border border-[var(--border-soft)]">
+                  <code className="text-[11px] break-all">{inspectKey.hwid}</code>
+                  <button
+                    onClick={() => handleCopy(inspectKey.hwid!, "HWID")}
+                    className="ref-btn !min-h-[24px] !px-2 text-[10px]"
+                  >
+                    <Copy className="w-3 h-3" /> Copy
+                  </button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[var(--line)] text-[11px]">
+                <div>
+                  <span className="text-[var(--muted)] block text-[10px]">Duration</span>
+                  <strong>{inspectKey.duration_days === 0 ? "Lifetime" : `${inspectKey.duration_days} Days`}</strong>
+                </div>
+                <div>
+                  <span className="text-[var(--muted)] block text-[10px]">Credit Cost</span>
+                  <strong className="text-amber-500">{inspectKey.credit_cost} CR</strong>
+                </div>
+                <div>
+                  <span className="text-[var(--muted)] block text-[10px]">Created By</span>
+                  <strong>@{inspectKey.created_by_name}</strong>
+                </div>
+                <div>
+                  <span className="text-[var(--muted)] block text-[10px]">Resets Used</span>
+                  <strong>{inspectKey.reset_count} / {inspectKey.max_resets}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Attached Payment Receipt & Proof Screenshot inside Key Inspector */}
+            {((inspectKey.payment_amount && inspectKey.payment_amount > 0) ||
+              inspectKey.proof_image ||
+              inspectKey.payment_method ||
+              inspectKey.customer_name) && (
+              <div className="p-4 rounded-lg border border-[var(--success-border)] bg-[var(--success-fill)] space-y-3 font-mono text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--success)]">
+                    <Receipt className="w-4 h-4" />
+                    Attached Payment Receipt &amp; Proof
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      printReceiptWindow({
+                        id: inspectKey.id,
+                        receipt_no: `VOID-KEY-${inspectKey.id}`,
+                        user_id: inspectKey.created_by_id,
+                        username: inspectKey.created_by_name,
+                        customer_name: inspectKey.customer_name || inspectKey.note || "Direct Buyer",
+                        amount_paid: inspectKey.payment_amount || 0,
+                        currency: inspectKey.payment_currency || "USD",
+                        credits_granted: inspectKey.credit_cost,
+                        keys_summary: `1x ${inspectKey.duration_days === 0 ? "Lifetime" : inspectKey.duration_days + "D"} Key (${inspectKey.key_str})`,
+                        payment_method: inspectKey.payment_method || "Direct",
+                        transaction_ref: inspectKey.payment_ref || "N/A",
+                        proof_image: inspectKey.proof_image,
+                        key_str: inspectKey.key_str,
+                        status: "paid",
+                        note: inspectKey.note,
+                        issued_by_id: inspectKey.created_by_id,
+                        issued_by_name: inspectKey.created_by_name,
+                        created_at: inspectKey.created_at,
+                      })
+                    }
+                    className="ref-btn !min-h-[26px] !px-2.5 text-[10.5px]"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Receipt</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[var(--ink)]">
+                  <div>
+                    <span className="text-[10px] text-[var(--muted)] block">Customer / Buyer</span>
+                    <strong>{inspectKey.customer_name || inspectKey.note || "—"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-[var(--muted)] block">Amount Paid</span>
+                    <strong>
+                      {(inspectKey.payment_amount || 0).toFixed(2)} {inspectKey.payment_currency || "USD"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-[var(--muted)] block">Payment Method</span>
+                    <strong>{inspectKey.payment_method || "Direct"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-[var(--muted)] block">Transaction Ref</span>
+                    <strong>{inspectKey.payment_ref || "N/A"}</strong>
+                  </div>
+                </div>
+
+                {inspectKey.proof_image && (
+                  <div className="pt-2 border-t border-[var(--line)]">
+                    <span className="text-[10px] text-[var(--muted)] block mb-1.5">
+                      Payment Proof Screenshot
+                    </span>
+                    <img
+                      src={inspectKey.proof_image}
+                      alt="Payment Proof Screenshot"
+                      className="max-h-56 w-auto rounded border border-[var(--border)] bg-[var(--surface-solid)]"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setInspectKey(null)} className="ref-btn">
+                Close
               </button>
             </div>
           </div>

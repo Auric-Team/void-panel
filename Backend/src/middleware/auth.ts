@@ -9,9 +9,16 @@ export interface AuthenticatedRequest {
 
 export function getAuthUser(req: Request): UserPublicProfile | null {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return null;
-
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  let token = "";
+  if (authHeader) {
+    token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  }
+  if (!token) {
+    try {
+      const url = new URL(req.url);
+      token = (url.searchParams.get("token") || "").trim();
+    } catch {}
+  }
   if (!token) return null;
 
   return AuthService.getUserByToken(token);

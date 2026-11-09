@@ -1,0 +1,20 @@
+{
+  "id": 3,
+  "receipt_no": "VOID-RCP-2026-0001",
+  "user_id": 74,
+  "username": "reseller",
+  "customer_name": "Reseller Partner Tier 1",
+  "amount_paid": 25,
+  "currency": "USD",
+  "credits_granted": 250,
+  "keys_summary": "250 Reseller Credits Pack (25x 24H Keys Equivalent)",
+  "payment_method": "USDT (TRC20)",
+  "transaction_ref": "TXN-984120A7F",
+  "status": "paid",
+  "note": "Initial Reseller Credit Pack Settlement",
+  "issued_by_id": 1,
+  "issued_by_name": "owner",
+  "created_at": 1794212982226,
+  "proof_image": "",
+  "key_str": ""
+}

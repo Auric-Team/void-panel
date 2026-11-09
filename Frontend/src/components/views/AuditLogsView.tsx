@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { LogRecord, api } from "../../lib/api";
-import { ShieldCheck, AlertCircle, RefreshCw, Trash2, Filter } from "lucide-react";
+import { LogRecord, api, copyToClipboard } from "../../lib/api";
+import { RefreshCw, Trash2, Copy, Check } from "lucide-react";
 import { useToast } from "../Toast";
 
 export const AuditLogsView: React.FC = () => {
@@ -8,6 +8,7 @@ export const AuditLogsView: React.FC = () => {
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const loadLogs = async () => {
     setLoading(true);
@@ -25,6 +26,15 @@ export const AuditLogsView: React.FC = () => {
     loadLogs();
   }, [statusFilter]);
 
+  const handleCopy = async (text: string, label = "Key") => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(text);
+      setTimeout(() => setCopiedId(null), 1500);
+      toast(`${label} copied!`, "success");
+    }
+  };
+
   const handleClearLogs = async () => {
     if (!confirm("Are you sure you want to clear all historical verification logs?")) return;
     try {
@@ -37,30 +47,29 @@ export const AuditLogsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg border border-[var(--border-soft)] bg-[var(--panel-gradient)]">
-        <div>
-          <h2 className="font-display text-xl font-normal">
-            Verification Audit Logs
-          </h2>
-          <p className="text-xs text-[var(--muted)]">
-            Trace every socket authentication handshake and rejection from mod menus.
-          </p>
+    <div className="space-y-5">
+      <div className="ref-panel p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="ref-section-head">
+          <span className="ref-section-number">02</span>
+          <div>
+            <h2 className="font-display text-2xl font-normal text-[var(--ink)]">
+              Verification Audit Logs ({logs.length})
+            </h2>
+            <p className="text-xs text-[var(--muted)]">
+              Trace every socket authentication handshake and rejection from mod menu clients.
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Status filter pill group */}
-          <div className="flex items-center gap-1 p-1 rounded-md border border-[var(--border-soft)] bg-[var(--surface)] text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="ref-tab-list">
             {["all", "authenticated", "mismatch", "expired", "invalid"].map((s) => (
               <button
                 key={s}
+                type="button"
+                aria-selected={statusFilter === s}
                 onClick={() => setStatusFilter(s)}
-                className={`px-2.5 py-1 rounded capitalize transition-all ${
-                  statusFilter === s
-                    ? "bg-[var(--surface-solid)] text-[var(--ink)] font-semibold shadow-sm"
-                    : "text-[var(--muted)] hover:text-[var(--ink)]"
-                }`}
+                className="ref-tab-btn capitalize !text-[11px] !px-2.5"
               >
                 {s}
               </button>
@@ -69,28 +78,28 @@ export const AuditLogsView: React.FC = () => {
 
           <button
             onClick={loadLogs}
-            className="p-2 rounded-md border border-[var(--border-soft)] text-[var(--muted)] hover:text-[var(--ink)] transition-colors"
+            className="ref-btn !px-2.5"
             title="Refresh logs"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
 
           <button
             onClick={handleClearLogs}
-            className="p-2 rounded-md border border-[var(--border-soft)] text-rose-500 hover:bg-rose-500/10 transition-colors"
+            className="ref-btn danger !px-2.5"
             title="Clear all logs"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Purge Logs</span>
           </button>
         </div>
       </div>
 
-      {/* Logs Table */}
-      <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--panel-gradient)] overflow-hidden shadow-sm">
+      <div className="ref-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-[var(--border-soft)] bg-[var(--surface)] text-[var(--muted)] font-mono text-[11px] uppercase tracking-wider">
+              <tr className="border-b border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] font-mono text-[10.5px] uppercase tracking-wider">
                 <th className="py-3 px-4">Timestamp</th>
                 <th className="py-3 px-4">Result Status</th>
                 <th className="py-3 px-4">Target Key</th>
@@ -99,38 +108,46 @@ export const AuditLogsView: React.FC = () => {
                 <th className="py-3 px-4">Diagnostics / Reason</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border-soft)] font-mono text-[11px]">
+            <tbody className="divide-y divide-[var(--line)] font-mono text-[11px]">
               {logs.length > 0 ? (
                 logs.map((log) => (
-                  <tr
-                    key={log.id}
-                    className="hover:bg-[var(--surface-hover)] transition-colors"
-                  >
+                  <tr key={log.id} className="hover:bg-[var(--surface-hover)] transition-colors">
                     <td className="py-3 px-4 text-[var(--muted)] whitespace-nowrap">
                       {new Date(log.timestamp).toLocaleString()}
                     </td>
                     <td className="py-3 px-4">
                       <span
-                        className={`inline-block px-2.5 py-0.5 rounded-pill text-[10px] uppercase font-bold tracking-wider ${
+                        className={`ref-badge !h-[20px] text-[10px] uppercase font-bold ${
                           log.status === "authenticated"
-                            ? "success-badge"
+                            ? "success"
                             : log.status === "mismatch"
-                            ? "warning-badge"
-                            : "danger-badge"
+                            ? "warning"
+                            : "danger"
                         }`}
                       >
                         {log.status}
                       </span>
                     </td>
                     <td className="py-3 px-4 font-bold text-[var(--ink)]">
-                      {log.key_str}
+                      <div className="flex items-center gap-1.5">
+                        <span>{log.key_str}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(log.key_str, "Key")}
+                          className="ref-btn !min-h-[20px] !px-1.5 text-[10px]"
+                        >
+                          {copiedId === log.key_str ? (
+                            <Check className="w-3 h-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      </div>
                     </td>
-                    <td className="py-3 px-4 text-[var(--muted)] max-w-[140px] truncate">
+                    <td className="py-3 px-4 text-[var(--muted)] max-w-[160px] truncate">
                       {log.hwid || "None"}
                     </td>
-                    <td className="py-3 px-4 text-[var(--muted)]">
-                      {log.ip}
-                    </td>
+                    <td className="py-3 px-4 text-[var(--muted)]">{log.ip}</td>
                     <td className="py-3 px-4 font-sans text-xs text-[var(--ink)]">
                       {log.message || "—"}
                     </td>
@@ -138,8 +155,8 @@ export const AuditLogsView: React.FC = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-xs text-[var(--muted)] font-sans">
-                    No logs found.
+                  <td colSpan={6} className="py-12 text-center text-xs text-[var(--muted)] font-mono">
+                    No verification logs found.
                   </td>
                 </tr>
               )}

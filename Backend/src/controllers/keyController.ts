@@ -11,7 +11,7 @@ export const KeyController = {
     const url = new URL(req.url);
     const search = url.searchParams.get("search") || undefined;
     const status = url.searchParams.get("status") || undefined;
-    const limit = Number(url.searchParams.get("limit")) || 200;
+    const limit = Number(url.searchParams.get("limit")) || 5000;
     const offset = Number(url.searchParams.get("offset")) || 0;
 
     const keys = KeyService.getAllKeys({ search, status, limit, offset }, authRes.user);
@@ -25,14 +25,25 @@ export const KeyController = {
     try {
       const body = await req.json();
 
+      const receipt = body.receipt
+        ? {
+            customerName: body.receipt.customerName || body.customerName,
+            amountPaid: body.receipt.amountPaid ?? body.amountPaid,
+            currency: body.receipt.currency || body.currency,
+            paymentMethod: body.receipt.paymentMethod || body.paymentMethod,
+            transactionRef: body.receipt.transactionRef || body.transactionRef,
+            proofImage: body.receipt.proofImage || body.proofImage,
+          }
+        : undefined;
+
       // Check if batch generation requested
       if (body.batch && body.count) {
         const count = Number(body.count) || 1;
-        const duration = Number(body.durationDays) ?? 1;
+        const duration = body.durationDays !== undefined ? Number(body.durationDays) : 1;
         const prefix = body.prefix || "VOID";
         const note = body.note || "";
 
-        const batchRes = KeyService.createBatchKeys(count, duration, note, prefix, authRes.user);
+        const batchRes = KeyService.createBatchKeys(count, duration, note, prefix, authRes.user, receipt);
         if (!batchRes.success) {
           return errorResponse(batchRes.error || "Batch generation failed", 400, {
             totalCost: batchRes.totalCost,
@@ -44,16 +55,17 @@ export const KeyController = {
           count: batchRes.keys?.length,
           totalCost: batchRes.totalCost,
           keys: batchRes.keys,
+          receipt: batchRes.receipt,
         });
       }
 
       // Single key generation
-      const duration = Number(body.durationDays) ?? 1;
+      const duration = body.durationDays !== undefined ? Number(body.durationDays) : 1;
       const customKey = body.customKey || undefined;
       const note = body.note || "";
-      const maxResets = Number(body.maxResets) || 3;
+      const maxResets = body.maxResets !== undefined ? Number(body.maxResets) : 3;
 
-      const singleRes = KeyService.createKey(duration, note, customKey, maxResets, authRes.user);
+      const singleRes = KeyService.createKey(duration, note, customKey, maxResets, authRes.user, receipt);
       if (!singleRes.success) {
         return errorResponse(singleRes.error || "Key creation failed", 400, {
           creditCost: singleRes.creditCost,
@@ -63,6 +75,7 @@ export const KeyController = {
       return jsonResponse({
         success: true,
         key: singleRes.key,
+        receipt: singleRes.receipt,
         creditCost: singleRes.creditCost,
       });
     } catch (err: any) {
@@ -137,15 +150,25 @@ export const KeyController = {
       const body = await req.json();
       const { action, keyIds, extraDays } = body;
 
-      if (!action || !keyIds || !Array.isArray(keyIds)) {
-        return errorResponse("action and keyIds array are required.", 400);
+      if (!action) {
+        return errorResponse("action is required.", 400);
       }
 
-      const res = KeyService.bulkAction(action, keyIds, Number(extraDays) || 30, authRes.user);
+      const res = KeyService.bulkAction(action, Array.isArray(keyIds) ? keyIds : [], Number(extraDays) || 30, authRes.user);
       return jsonResponse(res);
     } catch (err: any) {
       return errorResponse(err.message, 500);
     }
+  },
+
+  deleteAllKeys(req: Request): Response {
+    const authRes = requireAuth(req);
+    if (authRes instanceof Response) return authRes;
+
+    const url = new URL(req.url);
+    const filter = (url.searchParams.get("filter") as any) || "all";
+    const res = KeyService.deleteAllKeys(filter, authRes.user);
+    return jsonResponse(res);
   },
 
   exportKeys(req: Request): Response {

@@ -8,8 +8,12 @@ import { BanController } from "../controllers/banController.js";
 import { AnnouncementController } from "../controllers/announcementController.js";
 import { VoucherController } from "../controllers/voucherController.js";
 import { SettingsController } from "../controllers/settingsController.js";
+import { ReceiptController } from "../controllers/receiptController.js";
+import { NotificationController } from "../controllers/notificationController.js";
 import { jsonResponse, errorResponse } from "../utils/response.js";
 import { CONFIG } from "../config/index.js";
+import { uploadsReceiptsDir } from "../db/database.js";
+import { join } from "path";
 
 export async function handleRequest(req: Request, srv: any): Promise<Response> {
   const url = new URL(req.url);
@@ -40,6 +44,9 @@ export async function handleRequest(req: Request, srv: any): Promise<Response> {
   }
 
   // 3. User & Reseller Management (Owner > Admin > Reseller)
+  if (path === "/api/users/bulk" && method === "POST") {
+    return UserController.bulkAction(req);
+  }
   if (path === "/api/users" && method === "GET") {
     return UserController.getUsers(req);
   }
@@ -56,6 +63,32 @@ export async function handleRequest(req: Request, srv: any): Promise<Response> {
     if (method === "GET") return UserController.getUserById(req, id);
     if (method === "PATCH") return UserController.updateUserStatus(req, id);
     if (method === "DELETE") return UserController.deleteUser(req, id);
+  }
+
+  // 3b. Payment Receipts Routes
+  if (path === "/api/receipts" && method === "GET") {
+    return ReceiptController.getReceipts(req);
+  }
+  if (path === "/api/receipts" && method === "POST") {
+    return ReceiptController.createReceipt(req);
+  }
+  if (path === "/api/receipts/all" && method === "DELETE") {
+    return ReceiptController.deleteAllReceipts(req);
+  }
+  const receiptMatch = path.match(/^\/api\/receipts\/(\d+)$/);
+  if (receiptMatch && method === "DELETE") {
+    return ReceiptController.deleteReceipt(req, Number(receiptMatch[1]));
+  }
+
+  // 3c. Owner Key Creation Notifications & Dispatch Feed
+  if (path === "/api/notifications" && method === "GET") {
+    return NotificationController.getNotifications(req);
+  }
+  if (path === "/api/notifications/read" && method === "POST") {
+    return NotificationController.markRead(req);
+  }
+  if (path === "/api/notifications" && method === "DELETE") {
+    return NotificationController.clearAll(req);
   }
 
   // 4. Credit System Routes
@@ -133,6 +166,9 @@ export async function handleRequest(req: Request, srv: any): Promise<Response> {
   if (path === "/api/keys/bulk" && method === "POST") {
     return KeyController.bulkAction(req);
   }
+  if (path === "/api/keys/all" && method === "DELETE") {
+    return KeyController.deleteAllKeys(req);
+  }
   if (path === "/api/keys" && method === "GET") {
     return KeyController.getKeys(req);
   }
@@ -165,7 +201,24 @@ export async function handleRequest(req: Request, srv: any): Promise<Response> {
     return StatsController.clearLogs(req);
   }
 
-  // 11. System Health Check
+  // 11. Static Receipt Uploads Route (/uploads/receipts/:file)
+  const receiptFileMatch = path.match(/^\/uploads\/receipts\/([a-zA-Z0-9_.-]+)$/);
+  if (receiptFileMatch && method === "GET") {
+    const fileName = receiptFileMatch[1];
+    const filePath = join(uploadsReceiptsDir, fileName);
+    const file = Bun.file(filePath);
+    if (await file.exists()) {
+      return new Response(file, {
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          ...CONFIG.CORS_HEADERS,
+        },
+      });
+    }
+    return errorResponse("Receipt file not found", 404);
+  }
+
+  // 12. System Health Check
   if (path === "/health" || path === "/api/health") {
     return jsonResponse({
       status: "healthy",

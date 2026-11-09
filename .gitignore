@@ -7,12 +7,16 @@ node_modules/
 out/
 dist/
 build/
+*.tsbuildinfo
 
-# SQLite WAL and lock files
+# Ephemeral test DB and SQLite temp lock files (production Backend/data/panel.db & uploads/receipts/ are tracked!)
+Backend/data/test_panel.db*
 Backend/data/*.db-shm
 Backend/data/*.db-wal
+Backend/data/*.db-journal
 *.db-shm
 *.db-wal
+*.db-journal
 *.log
 
 # OS files
